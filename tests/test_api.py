@@ -6,7 +6,7 @@ os.environ.update(MONGODB_URI="mongomock://", DEV_MODE="1", ADMIN_IDS="1", CRON_
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
 from fastapi.testclient import TestClient
-from _lib import auth, jobs, telegram
+from _lib import auth, jobs, routes, telegram
 from _lib.db import db
 from _lib.leaderboard import now
 from _lib.routes import app
@@ -67,12 +67,35 @@ def test_flow():
     assert c.get("/api/admin/analytics", headers=H(2)).status_code == 403
 
 
+def test_quiz_time_limit_and_whole_second_timing(monkeypatch):
+    assert c.post("/api/admin/quizzes", json=dict(QUIZ, max_seconds=0), headers=H(1)).status_code == 422
+    r = c.post("/api/admin/quizzes", json=dict(QUIZ, max_seconds=5), headers=H(1))
+    assert r.status_code == 200
+    qid = r.json()["id"]
+    started = c.post(f"/api/quizzes/{qid}/start", headers=H(20)).json()
+    assert started["max_seconds"] == 5
+    started_at = db().attempts.find_one({"quiz_id": qid, "user_id": 20})["started_at"]
+    monkeypatch.setattr(routes, "now", lambda: started_at + timedelta(seconds=1.2))
+    question_id = started["questions"][0]["id"]
+    result = c.post(f"/api/quizzes/{qid}/submit", json={"answers": {question_id: "1"}}, headers=H(20))
+    assert result.status_code == 200 and result.json()["time_ms"] == 2000
+
+    r = c.post("/api/admin/quizzes", json=dict(QUIZ, max_seconds=1), headers=H(1))
+    qid = r.json()["id"]
+    c.post(f"/api/quizzes/{qid}/start", headers=H(21))
+    started_at = db().attempts.find_one({"quiz_id": qid, "user_id": 21})["started_at"]
+    monkeypatch.setattr(routes, "now", lambda: started_at + timedelta(seconds=7))
+    result = c.post(f"/api/quizzes/{qid}/submit", json={"answers": {}}, headers=H(21))
+    assert result.status_code == 409 and "Time limit expired" in result.json()["detail"]
+
+
 def test_tie_break_by_time():
     d = db(); t = now()
-    for uid, ms in [(10, 9000), (11, 4000)]:
+    for uid, ms in [(10, 9100), (11, 9400)]:
         d.attempts.insert_one({"_id": f"t{uid}", "quiz_id": "tie", "user_id": uid, "user": {"id": uid, "name": f"U{uid}"}, "started_at": t,
                                "submitted_at": t, "day_key": "2000-01-01", "points": 50, "time_ms": ms, "results": []})
-    assert [r["user_id"] for r in __import__("_lib.leaderboard", fromlist=["x"]).board_for_day(d, "2000-01-01")] == [11, 10]
+    rows = __import__("_lib.leaderboard", fromlist=["x"]).board_for_day(d, "2000-01-01")
+    assert [r["time_ms"] for r in rows] == [10000, 10000]
 
 
 def test_schedule_and_tick():

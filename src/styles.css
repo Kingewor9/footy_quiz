@@ -65,6 +65,13 @@ h2 { font-size: 18px; margin: 26px 0 10px; }
 
 .progress { height: 6px; border-radius: 9px; background: var(--line); overflow: hidden; }
 .progress > i { display: block; height: 100%; background: var(--accent); transition: width .25s; }
+.quiz-timer { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 6px; color: var(--accent); }
+.quiz-timer span { font-size: 11px; font-weight: 750; letter-spacing: .12em; }
+.quiz-timer strong { font-variant-numeric: tabular-nums; font-size: 24px; line-height: 1; }
+.quiz-timer.urgent { color: var(--red); }
+.timer-progress { height: 4px; background: var(--line); border-radius: 9px; overflow: hidden; }
+.timer-progress > i { display: block; height: 100%; background: var(--accent); transition: width .2s linear; }
+.quiz-timer.urgent + .timer-progress > i { background: var(--red); }
 .q-img { width: 100%; max-height: 240px; object-fit: cover; border-radius: 16px; margin-bottom: 12px; background: var(--soft); }
 .q-text { font-size: 21px; font-weight: 700; line-height: 1.3; margin: 8px 0 16px; }
 .opt { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 15px; border-radius: 16px; background: var(--card); box-shadow: var(--shadow); margin-bottom: 10px; border: 2px solid transparent; font-weight: 550; }

@@ -19,8 +19,9 @@ tests/              backend tests (pytest, in-memory Mongo)
   (comma-separated accepted answers, case/accent/punctuation ignored) or an **image** question (image link,
   with options or a typed answer). You set the points per question.
 - **One play per quiz.** Correct answers never reach the browser; grading and timing happen on the server.
-- **Score** = sum of points for correct answers. **Total time** (measured by the server from start to finish)
-  only breaks ties.
+- **Score** = sum of points for correct answers. The admin sets each quiz's time limit (1–3600 seconds,
+  default 60); players see a countdown and their answers submit when it expires. **Total time** is measured
+  by the server in whole seconds and only breaks ties.
 - **Several quizzes a day** add up on that day's leaderboard. The day runs 00:00-23:59 in `APP_TZ`.
 - Leaderboard arrows show how many places the most recent quiz moved a player (green up, red down, dash = no
   change or first quiz of the day).

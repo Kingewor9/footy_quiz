@@ -42,7 +42,7 @@ export default function Home({ me, onPlay, onLeaderboard }: { me: Me; onPlay: (i
           <div className="grow">
             <div className="name">{q.title}</div>
             <div className="small muted">
-              {q.question_count} question{q.question_count !== 1 && 's'}, up to {q.total_points} points
+              {q.question_count} question{q.question_count !== 1 && 's'}, up to {q.total_points} points · {q.max_seconds}s
             </div>
           </div>
           {q.played ? (

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import math
 
 from . import config
 
@@ -28,7 +29,7 @@ def standings(attempts: list) -> list:
         )
         row.update(name=u["name"], username=u.get("username"), photo_url=u.get("photo_url"))
         row["points"] += a["points"]
-        row["time_ms"] += a["time_ms"]
+        row["time_ms"] += math.ceil(a["time_ms"] / 1000) * 1000
     rows = sorted(agg.values(), key=lambda r: (-r["points"], r["time_ms"], r["first"]))
     for i, r in enumerate(rows):
         r["rank"] = i + 1

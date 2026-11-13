@@ -95,6 +95,7 @@ function QuestionEditor({ n, d, onChange, onRemove, canRemove }: { n: number; d:
 
 export default function SendQuiz() {
   const [title, setTitle] = useState('')
+  const [maxSeconds, setMaxSeconds] = useState(60)
   const [when, setWhen] = useState<'now' | 'later'>('now')
   const [at, setAt] = useState('')
   const [qs, setQs] = useState<Draft[]>([blank()])
@@ -110,11 +111,13 @@ export default function SendQuiz() {
   const submit = async () => {
     setMsg(null)
     if (!title.trim()) return setMsg({ ok: false, text: 'Give the quiz a title.' })
+    if (!Number.isInteger(maxSeconds) || maxSeconds < 1 || maxSeconds > 3600) return setMsg({ ok: false, text: 'Set a time limit from 1 to 3600 whole seconds.' })
     if (when === 'later' && (!at || new Date(at).getTime() <= Date.now())) return setMsg({ ok: false, text: 'Pick a future date and time.' })
     setBusy(true)
     try {
       const r = await api.admin.create({
         title: title.trim(),
+        max_seconds: maxSeconds,
         scheduled_at: when === 'later' ? new Date(at).toISOString() : null,
         questions: qs.map(toPayload),
       })
@@ -122,6 +125,7 @@ export default function SendQuiz() {
       else if (r.notified) setMsg({ ok: true, text: 'Quiz is live and posted in the channel.' })
       else setMsg({ ok: false, text: `Quiz is live, but the channel post failed: ${r.error}` })
       setTitle('')
+      setMaxSeconds(60)
       setQs([blank()])
       loadRecent()
     } catch (e) {
@@ -137,6 +141,10 @@ export default function SendQuiz() {
         <div className="field">
           <label>Quiz title</label>
           <input className="input" placeholder="Matchday trivia" value={title} onChange={(e) => setTitle(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="quiz-time-limit">Time limit in seconds (1–3600)</label>
+          <input id="quiz-time-limit" className="input" type="number" min={1} max={3600} step={1} required value={maxSeconds} onChange={(e) => setMaxSeconds(Number(e.target.value))} />
         </div>
         <div className="seg">
           <button className={when === 'now' ? 'on' : ''} onClick={() => setWhen('now')}>Send now</button>
@@ -160,6 +168,7 @@ export default function SendQuiz() {
                 <div className="name">{q.title}</div>
                 <div className="small muted">
                   {q.status === 'scheduled' ? `Scheduled ${new Date(q.scheduled_at!).toLocaleString()}` : `${q.players} player${q.players !== 1 ? 's' : ''}`}
+                  {' · '}{q.max_seconds}s limit
                 </div>
                 {q.notify_error && <div className="small" style={{ color: 'var(--red)' }}>Not posted: {q.notify_error}</div>}
               </div>

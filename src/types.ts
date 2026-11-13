@@ -14,6 +14,7 @@ export interface QuizSummary {
   title: string
   question_count: number
   total_points: number
+  max_seconds: number
   posted_at: string
   played: boolean
   score: number | null
@@ -31,6 +32,7 @@ export interface StartedQuiz {
   id: string
   title: string
   questions: Question[]
+  max_seconds: number
   elapsed_ms: number
 }
 export interface QuestionResult {
@@ -78,6 +80,7 @@ export interface AdminQuiz {
   title: string
   status: 'scheduled' | 'live' | 'publishing'
   question_count: number
+  max_seconds: number
   scheduled_at: string | null
   posted_at: string | null
   players: number
@@ -107,4 +110,10 @@ export interface CreateOutcome {
   notified: boolean
   error: string | null
   scheduled_at?: string
+}
+export interface QuizPayload {
+  title: string
+  scheduled_at: string | null
+  max_seconds: number
+  questions: QuestionPayload[]
 }

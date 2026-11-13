@@ -1,5 +1,5 @@
 import { initData } from './telegram'
-import type { AdminQuiz, Analytics, Board, CreateOutcome, Me, QuestionPayload, QuizResult, QuizSummary, StartedQuiz } from './types'
+import type { AdminQuiz, Analytics, Board, CreateOutcome, Me, QuizPayload, QuizResult, QuizSummary, StartedQuiz } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -42,7 +42,7 @@ export const api = {
   leaderboard: () => req<Board>('/leaderboard'),
   admin: {
     quizzes: () => req<AdminQuiz[]>('/admin/quizzes'),
-    create: (body: { title: string; scheduled_at: string | null; questions: QuestionPayload[] }) => post<CreateOutcome>('/admin/quizzes', body),
+    create: (body: QuizPayload) => post<CreateOutcome>('/admin/quizzes', body),
     cancel: (id: string) => req<{ ok: boolean }>(`/admin/quizzes/${id}`, { method: 'DELETE' }),
     analytics: () => req<Analytics>('/admin/analytics'),
   },

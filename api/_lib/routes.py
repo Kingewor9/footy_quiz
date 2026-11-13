@@ -1,4 +1,5 @@
 import hmac
+import math
 import uuid
 from datetime import timedelta
 from typing import Optional
@@ -17,6 +18,8 @@ app = FastAPI(title="Footy Quiz API")
 router = APIRouter(prefix="/api")
 
 LIVE_HOURS = 24  # a quiz stays playable for 24h after it is posted
+DEFAULT_MAX_SECONDS = 60
+SUBMIT_GRACE_SECONDS = 5
 
 
 def iso(dt):
@@ -89,6 +92,7 @@ def live_quizzes(user: dict = Depends(current_user)):
                 "title": q["title"],
                 "question_count": len(q["questions"]),
                 "total_points": sum(x["points"] for x in q["questions"]),
+                "max_seconds": q.get("max_seconds", DEFAULT_MAX_SECONDS),
                 "posted_at": iso(q["posted_at"]),
                 "played": done,
                 "score": a["points"] if done else None,
@@ -125,6 +129,7 @@ def start_quiz(qid: str, user: dict = Depends(current_user)):
         "id": quiz["_id"],
         "title": quiz["title"],
         "questions": [public_question(q) for q in quiz["questions"]],
+        "max_seconds": quiz.get("max_seconds", DEFAULT_MAX_SECONDS),
         "elapsed_ms": max(0, elapsed),
     }
 
@@ -138,14 +143,18 @@ def submit_quiz(qid: str, body: SubmitIn, user: dict = Depends(current_user)):
         raise HTTPException(404, "Quiz not found. Start it first.")
     if attempt.get("submitted_at"):
         raise HTTPException(409, "already_played")
+    max_seconds = quiz.get("max_seconds", DEFAULT_MAX_SECONDS)
+    submitted = now()
+    elapsed_seconds = max(0, (submitted - attempt["started_at"]).total_seconds())
+    if elapsed_seconds > max_seconds + SUBMIT_GRACE_SECONDS:
+        raise HTTPException(409, "Time limit expired before your answers could be submitted.")
     results, points = [], 0
     for q in quiz["questions"]:
         g = grade(q, body.answers.get(q["id"], ""))
         earned = q["points"] if g["correct"] else 0
         points += earned
         results.append({"id": q["id"], "text": q["text"], "points": earned, "max": q["points"], **g})
-    submitted = now()
-    time_ms = max(0, int((submitted - attempt["started_at"]).total_seconds() * 1000))  # measured by the server
+    time_ms = min(max_seconds, math.ceil(elapsed_seconds)) * 1000  # measured by the server in whole seconds
     claimed = d.attempts.find_one_and_update(
         {"_id": attempt["_id"], "submitted_at": None},
         {"$set": {"submitted_at": submitted, "day_key": day_key(submitted), "points": points, "time_ms": time_ms, "results": results, "user": snapshot(user)}},
@@ -192,6 +201,7 @@ def create_quiz(body: QuizIn, user: dict = Depends(admin_user)):
         "_id": uuid.uuid4().hex[:10],
         "title": body.title.strip(),
         "questions": questions,
+        "max_seconds": body.max_seconds,
         "created_by": user["id"],
         "created_at": now(),
         "scheduled_at": body.scheduled_at,
@@ -217,6 +227,7 @@ def admin_quizzes(user: dict = Depends(admin_user)):
                 "title": q["title"],
                 "status": q["status"],
                 "question_count": len(q["questions"]),
+                "max_seconds": q.get("max_seconds", DEFAULT_MAX_SECONDS),
                 "scheduled_at": iso(q.get("scheduled_at")),
                 "posted_at": iso(q.get("posted_at")),
                 "players": d.attempts.count_documents({"quiz_id": q["_id"], "submitted_at": {"$ne": None}}),

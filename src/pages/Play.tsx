@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, fmtTime } from '../api'
 import ScoreCard from '../components/ScoreCard'
 import { haptic } from '../telegram'
@@ -13,6 +13,9 @@ export default function Play({ quizId, onExit, onLeaderboard }: { quizId: string
   const [busy, setBusy] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const t0 = useRef(0)
+  const answersRef = useRef(answers)
+  const submittedRef = useRef(false)
+  answersRef.current = answers
 
   useEffect(() => {
     let live = true
@@ -22,6 +25,7 @@ export default function Play({ quizId, onExit, onLeaderboard }: { quizId: string
         if (!live) return
         t0.current = Date.now() - q.elapsed_ms
         setQuiz(q)
+        setElapsed(q.elapsed_ms)
       })
       .catch(async (e: ApiError) => {
         if (e.status === 409) {
@@ -46,7 +50,9 @@ export default function Play({ quizId, onExit, onLeaderboard }: { quizId: string
     return () => clearInterval(t)
   }, [quiz, result])
 
-  const finish = async (final: Record<string, string>) => {
+  const finish = useCallback(async (final: Record<string, string>) => {
+    if (submittedRef.current) return
+    submittedRef.current = true
     setBusy(true)
     try {
       const r = await api.submit(quizId, final)
@@ -55,8 +61,15 @@ export default function Play({ quizId, onExit, onLeaderboard }: { quizId: string
     } catch (e) {
       setErr((e as Error).message)
       setBusy(false)
+      submittedRef.current = false
     }
-  }
+  }, [quizId])
+
+  useEffect(() => {
+    if (quiz && !result && elapsed >= quiz.max_seconds * 1000) {
+      void finish(answersRef.current)
+    }
+  }, [elapsed, finish, quiz, result])
 
   if (err)
     return (
@@ -77,14 +90,26 @@ export default function Play({ quizId, onExit, onLeaderboard }: { quizId: string
   const value = answers[q.id] ?? ''
   const last = i === quiz.questions.length - 1
   const next = () => (last ? finish(answers) : setI(i + 1))
+  const remainingMs = Math.max(0, quiz.max_seconds * 1000 - elapsed)
+  const remainingSeconds = Math.ceil(remainingMs / 1000)
+  const timerPercent = (remainingMs / (quiz.max_seconds * 1000)) * 100
+  const timeExpired = remainingMs === 0
 
   return (
     <div className="page play">
       <div className="row between small muted" style={{ marginBottom: 8 }}>
         <span>Question {i + 1} of {quiz.questions.length}</span>
-        <span>{q.points} pts · {fmtTime(elapsed)}</span>
+        <span>{q.points} pts</span>
       </div>
       <div className="progress"><i style={{ width: `${((i + 1) / quiz.questions.length) * 100}%` }} /></div>
+
+      <div className={`quiz-timer ${remainingSeconds <= 10 ? 'urgent' : ''}`} role="timer" aria-label={`${remainingSeconds} seconds remaining`}>
+        <span>TIME LEFT</span>
+        <strong>{fmtTime(remainingMs)}</strong>
+      </div>
+      <div className="timer-progress" aria-hidden="true">
+        <i style={{ width: `${timerPercent}%` }} />
+      </div>
 
       <div style={{ marginTop: 18 }}>
         {q.image_url && <img className="q-img" src={q.image_url} alt="" />}
@@ -92,7 +117,7 @@ export default function Play({ quizId, onExit, onLeaderboard }: { quizId: string
 
         {q.answer_mode === 'options' ? (
           q.options.map((o, idx) => (
-            <button key={idx} className={`opt ${value === String(idx) ? 'sel' : ''}`} onClick={() => { haptic('tap'); setAnswers({ ...answers, [q.id]: String(idx) }) }}>
+            <button key={idx} disabled={busy || timeExpired} className={`opt ${value === String(idx) ? 'sel' : ''}`} onClick={() => { haptic('tap'); setAnswers({ ...answers, [q.id]: String(idx) }) }}>
               <i>{String.fromCharCode(65 + idx)}</i>
               {o}
             </button>
@@ -103,13 +128,14 @@ export default function Play({ quizId, onExit, onLeaderboard }: { quizId: string
             placeholder="Type your answer"
             value={value}
             autoFocus
+            disabled={busy || timeExpired}
             onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
             onKeyDown={(e) => e.key === 'Enter' && value.trim() && next()}
           />
         )}
       </div>
 
-      <button className="btn block" style={{ marginTop: 14 }} disabled={busy || !value.trim()} onClick={next}>
+      <button className="btn block" style={{ marginTop: 14 }} disabled={busy || timeExpired || !value.trim()} onClick={next}>
         {busy ? 'Submitting…' : last ? 'Finish quiz' : 'Next question'}
       </button>
     </div>
