@@ -156,18 +156,43 @@ def test_quiz_notification_with_image_and_catchy_text():
             {"id": "q2", "text": "Q2", "points": 25},
         ],
         "max_seconds": 45,
+        "expires_hours": 48,
     }
 
     res = jobs.publish_quiz(d, quiz_doc)
     assert res["notified"] is True
     assert res["error"] is None
     assert sent["image_url"] == "https://ibb.co/B5RgyFsH"
-    assert "KICKOFF ALERT" in sent["caption"]
-    assert "CHAMPIONS LEAGUE FINAL SPECIAL" in sent["caption"]
-    assert "2X Booster" in sent["caption"]
-    assert "45 seconds" in sent["caption"]
-    assert "PLAY NOW" in sent["button_text"]
+    assert "New Quiz Available" in sent["caption"]
+    assert "Champions League Final Special" in sent["caption"]
+    assert "Total questions:" in sent["caption"]
+    assert "Total points:" in sent["caption"]
+    assert "Expires:" in sent["caption"] and "48 hours" in sent["caption"]
+    assert "Play Now" in sent["caption"]
+    assert sent["button_text"] == "Play now"
     assert sent["url"] == "https://t.me/bot/app?startapp=quiz_notify_test"
+
+
+def test_quiz_custom_expiration_hours(monkeypatch):
+    r = c.post("/api/admin/quizzes", json=dict(QUIZ, title="Expiring Quiz", expires_hours=6), headers=H(1))
+    assert r.status_code == 200
+    qid = r.json()["id"]
+
+    # Immediately live
+    quiz_in_db = db().quizzes.find_one({"_id": qid})
+    assert quiz_in_db["expires_hours"] == 6
+    assert quiz_in_db["expires_at"] is not None
+
+    # Available after 2 hours
+    posted = quiz_in_db["posted_at"]
+    monkeypatch.setattr(routes, "now", lambda: posted + timedelta(hours=2))
+    assert any(q["id"] == qid for q in c.get("/api/quizzes", headers=H(2)).json())
+    assert c.post(f"/api/quizzes/{qid}/start", headers=H(90)).status_code == 200
+
+    # Expired after 7 hours
+    monkeypatch.setattr(routes, "now", lambda: posted + timedelta(hours=7))
+    assert not any(q["id"] == qid for q in c.get("/api/quizzes", headers=H(2)).json())
+    assert c.post(f"/api/quizzes/{qid}/start", headers=H(91)).status_code == 404
 
 
 def test_winner_announcement(monkeypatch=None):

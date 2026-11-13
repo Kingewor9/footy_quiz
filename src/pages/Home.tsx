@@ -122,6 +122,9 @@ export default function Home({
                 <Clock size={12} />
                 {q.max_seconds}s
               </span>
+              <span className="fixture-meta-tag">
+                {q.expires_hours ?? 24}h live
+              </span>
               <span className="fixture-meta-tag gold">
                 <Award size={12} />
                 Up to {q.total_points} pts

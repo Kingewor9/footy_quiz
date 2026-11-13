@@ -17,7 +17,7 @@ from .models import QuizIn, SubmitIn
 app = FastAPI(title="Footy Quiz API")
 router = APIRouter(prefix="/api")
 
-LIVE_HOURS = 24  # a quiz stays playable for 24h after it is posted
+DEFAULT_EXPIRES_HOURS = 24
 DEFAULT_MAX_SECONDS = 60
 SUBMIT_GRACE_SECONDS = 5
 
@@ -30,9 +30,19 @@ def snapshot(user: dict) -> dict:
     return {k: user.get(k) for k in ("id", "name", "username", "photo_url")}
 
 
+def is_quiz_expired(q: dict) -> bool:
+    if not q or q.get("status") != "live":
+        return True
+    if "expires_at" in q and q["expires_at"]:
+        return q["expires_at"] <= now()
+    hours = q.get("expires_hours", DEFAULT_EXPIRES_HOURS)
+    posted = q.get("posted_at")
+    return not posted or posted < now() - timedelta(hours=hours)
+
+
 def get_live_quiz(d, qid: str) -> dict:
     q = d.quizzes.find_one({"_id": qid, "status": "live"})
-    if not q or q["posted_at"] < now() - timedelta(hours=LIVE_HOURS):
+    if not q or is_quiz_expired(q):
         raise HTTPException(404, "This quiz is not available any more.")
     return q
 
@@ -80,8 +90,8 @@ def me(user: dict = Depends(current_user)):
 @router.get("/quizzes")
 def live_quizzes(user: dict = Depends(current_user)):
     d = db()
-    since = now() - timedelta(hours=LIVE_HOURS)
-    quizzes = list(d.quizzes.find({"status": "live", "posted_at": {"$gte": since}}).sort("posted_at", -1))
+    all_live = list(d.quizzes.find({"status": "live"}).sort("posted_at", -1))
+    quizzes = [q for q in all_live if not is_quiz_expired(q)]
     mine = {a["quiz_id"]: a for a in d.attempts.find({"user_id": user["id"], "quiz_id": {"$in": [q["_id"] for q in quizzes]}})}
     out = []
     for q in quizzes:
@@ -94,6 +104,7 @@ def live_quizzes(user: dict = Depends(current_user)):
                 "question_count": len(q["questions"]),
                 "total_points": sum(x["points"] for x in q["questions"]),
                 "max_seconds": q.get("max_seconds", DEFAULT_MAX_SECONDS),
+                "expires_hours": q.get("expires_hours", DEFAULT_EXPIRES_HOURS),
                 "posted_at": iso(q["posted_at"]),
                 "played": done,
                 "score": a["points"] if done else None,
@@ -222,16 +233,19 @@ def leaderboard(day: Optional[str] = Query(None), user: dict = Depends(current_u
 def create_quiz(body: QuizIn, user: dict = Depends(admin_user)):
     d = db()
     questions = [{**q.model_dump(), "id": uuid.uuid4().hex[:8]} for q in body.questions]
+    expires_hours = body.expires_hours or DEFAULT_EXPIRES_HOURS
     quiz = {
         "_id": uuid.uuid4().hex[:10],
         "title": body.title.strip(),
         "questions": questions,
         "max_seconds": body.max_seconds,
+        "expires_hours": expires_hours,
         "created_by": user["id"],
         "created_at": now(),
         "scheduled_at": body.scheduled_at,
         "status": "scheduled",
         "posted_at": None,
+        "expires_at": None,
     }
     later = body.scheduled_at and body.scheduled_at > now()
     d.quizzes.insert_one(quiz)
@@ -253,6 +267,7 @@ def admin_quizzes(user: dict = Depends(admin_user)):
                 "status": q["status"],
                 "question_count": len(q["questions"]),
                 "max_seconds": q.get("max_seconds", DEFAULT_MAX_SECONDS),
+                "expires_hours": q.get("expires_hours", DEFAULT_EXPIRES_HOURS),
                 "scheduled_at": iso(q.get("scheduled_at")),
                 "posted_at": iso(q.get("posted_at")),
                 "players": d.attempts.count_documents({"quiz_id": q["_id"], "submitted_at": {"$ne": None}}),

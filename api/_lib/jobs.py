@@ -9,25 +9,22 @@ from .winner_card import build_card, fmt_time
 def publish_quiz(db, quiz: dict) -> dict:
     """Mark a quiz live and post the channel notification. Returns {notified, error}."""
     notified, error = False, None
+    expires_hours = quiz.get("expires_hours", 24)
     if telegram.configured() and config.mini_app_link():
         try:
             total = sum(q["points"] for q in quiz["questions"])
             n = len(quiz["questions"])
-            max_seconds = quiz.get("max_seconds", 60)
-            title = quiz.get("title", "Matchday Quiz").strip()
+            title = quiz.get("title", "").strip()
 
             text = (
-                f"🚨 <b>KICKOFF ALERT: {title.upper()} IS LIVE!</b> ⚽🔥\n\n"
-                f"Think you've got elite football knowledge? It's time to lace up and prove it on the pitch! 🏆\n\n"
-                f"⚡ <b>Match Intel:</b>\n"
-                f"• <b>Fixtures:</b> {n} trivia challenge{'s' if n != 1 else ''}\n"
-                f"• <b>Total Points:</b> Up to {total} PTS\n"
-                f"• <b>Match Clock:</b> {max_seconds} seconds ⏱️\n"
-                f"• <b>Power-Up:</b> ⚡ 2X Booster available to double your score!\n\n"
-                f"🥇 <i>Climb to the top of today's leaderboard before the final whistle!</i>\n\n"
-                f"👇 <b>Hit the button below to kickoff your match right now!</b>"
+                f"<b>New Quiz Available</b>\n\n"
+                f"<b>Title:</b> {title}\n"
+                f"<b>Total questions:</b> {n}\n"
+                f"<b>Total points:</b> {total} pts\n"
+                f"<b>Expires:</b> {expires_hours} hours\n\n"
+                f"Hit the <b>Play Now</b> button below to start!"
             )
-            button_label = "⚽ PLAY NOW & WIN"
+            button_label = "Play now"
             msg = telegram.send_quiz_notification(
                 caption=text,
                 button_text=button_label,
@@ -40,9 +37,20 @@ def publish_quiz(db, quiz: dict) -> dict:
             error = str(e)
     else:
         error = "BOT_TOKEN, CHANNEL_ID or MINI_APP_LINK is not set, so no channel post was made."
+    posted = now()
+    expires_at = posted + timedelta(hours=expires_hours)
     db.quizzes.update_one(
         {"_id": quiz["_id"]},
-        {"$set": {"status": "live", "posted_at": now(), "notified": notified, "notify_error": error}},
+        {
+            "$set": {
+                "status": "live",
+                "posted_at": posted,
+                "expires_at": expires_at,
+                "expires_hours": expires_hours,
+                "notified": notified,
+                "notify_error": error,
+            }
+        },
     )
     return {"notified": notified, "error": error}
 
