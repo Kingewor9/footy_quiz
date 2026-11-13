@@ -136,6 +136,40 @@ def test_schedule_and_tick():
     assert db().quizzes.find_one({"_id": r["id"]})["status"] == "live"
 
 
+def test_quiz_notification_with_image_and_catchy_text():
+    d = db()
+    os.environ["CHANNEL_ID"] = "@chan"
+    os.environ["MINI_APP_LINK"] = "https://t.me/bot/app"
+    sent = {}
+
+    def fake_send_quiz_notification(caption, button_text, url, image_url=None):
+        sent.update(caption=caption, button_text=button_text, url=url, image_url=image_url)
+        return {"message_id": 999}
+
+    telegram.send_quiz_notification = fake_send_quiz_notification
+
+    quiz_doc = {
+        "_id": "quiz_notify_test",
+        "title": "Champions League Final Special",
+        "questions": [
+            {"id": "q1", "text": "Q1", "points": 25},
+            {"id": "q2", "text": "Q2", "points": 25},
+        ],
+        "max_seconds": 45,
+    }
+
+    res = jobs.publish_quiz(d, quiz_doc)
+    assert res["notified"] is True
+    assert res["error"] is None
+    assert sent["image_url"] == "https://ibb.co/B5RgyFsH"
+    assert "KICKOFF ALERT" in sent["caption"]
+    assert "CHAMPIONS LEAGUE FINAL SPECIAL" in sent["caption"]
+    assert "2X Booster" in sent["caption"]
+    assert "45 seconds" in sent["caption"]
+    assert "PLAY NOW" in sent["button_text"]
+    assert sent["url"] == "https://t.me/bot/app?startapp=quiz_notify_test"
+
+
 def test_winner_announcement(monkeypatch=None):
     d = db(); y = (now() - timedelta(days=1))
     from _lib.leaderboard import day_key

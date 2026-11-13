@@ -13,12 +13,27 @@ def publish_quiz(db, quiz: dict) -> dict:
         try:
             total = sum(q["points"] for q in quiz["questions"])
             n = len(quiz["questions"])
+            max_seconds = quiz.get("max_seconds", 60)
+            title = quiz.get("title", "Matchday Quiz").strip()
+
             text = (
-                f"New quiz: {quiz['title']}\n\n"
-                f"{n} question{'s' if n != 1 else ''}, up to {total} points.\n"
-                f"Play once, be quick, and climb today's leaderboard."
+                f"🚨 <b>KICKOFF ALERT: {title.upper()} IS LIVE!</b> ⚽🔥\n\n"
+                f"Think you've got elite football knowledge? It's time to lace up and prove it on the pitch! 🏆\n\n"
+                f"⚡ <b>Match Intel:</b>\n"
+                f"• <b>Fixtures:</b> {n} trivia challenge{'s' if n != 1 else ''}\n"
+                f"• <b>Total Points:</b> Up to {total} PTS\n"
+                f"• <b>Match Clock:</b> {max_seconds} seconds ⏱️\n"
+                f"• <b>Power-Up:</b> ⚡ 2X Booster available to double your score!\n\n"
+                f"🥇 <i>Climb to the top of today's leaderboard before the final whistle!</i>\n\n"
+                f"👇 <b>Hit the button below to kickoff your match right now!</b>"
             )
-            msg = telegram.send_message(text, "Play now", telegram.quiz_link(quiz["_id"]))
+            button_label = "⚽ PLAY NOW & WIN"
+            msg = telegram.send_quiz_notification(
+                caption=text,
+                button_text=button_label,
+                url=telegram.quiz_link(quiz["_id"]),
+                image_url=config.quiz_notification_image_url(),
+            )
             notified = True
             db.quizzes.update_one({"_id": quiz["_id"]}, {"$set": {"channel_message_id": msg["message_id"]}})
         except Exception as e:  # keep the quiz live even if the post fails

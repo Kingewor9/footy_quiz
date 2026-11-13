@@ -27,25 +27,60 @@ def _check(r: httpx.Response) -> dict:
     return data["result"]
 
 
-def send_message(text: str, button_text: str, url: str) -> dict:
+def send_message(text: str, button_text: str, url: str, parse_mode: str = "HTML") -> dict:
     payload = {
         "chat_id": config.channel_id(),
         "text": text,
+        "parse_mode": parse_mode,
         "reply_markup": {"inline_keyboard": [[{"text": button_text, "url": url}]]},
     }
     return _check(httpx.post(_url("sendMessage"), json=payload, timeout=TIMEOUT))
 
 
-def send_photo(png: bytes, caption: str, button_text: str, url: str) -> dict:
+def send_photo_url(photo_url: str, caption: str, button_text: str, url: str, parse_mode: str = "HTML") -> dict:
+    payload = {
+        "chat_id": config.channel_id(),
+        "photo": photo_url,
+        "caption": caption,
+        "parse_mode": parse_mode,
+        "reply_markup": {"inline_keyboard": [[{"text": button_text, "url": url}]]},
+    }
+    return _check(httpx.post(_url("sendPhoto"), json=payload, timeout=TIMEOUT))
+
+
+def send_photo(png: bytes, caption: str, button_text: str, url: str, parse_mode: str = "HTML") -> dict:
     import json
 
     data = {
         "chat_id": config.channel_id(),
         "caption": caption,
+        "parse_mode": parse_mode,
         "reply_markup": json.dumps({"inline_keyboard": [[{"text": button_text, "url": url}]]}),
     }
     files = {"photo": ("winner.png", png, "image/png")}
     return _check(httpx.post(_url("sendPhoto"), data=data, files=files, timeout=30))
+
+
+def send_quiz_notification(caption: str, button_text: str, url: str, image_url: Optional[str] = None) -> dict:
+    img = image_url or config.quiz_notification_image_url()
+    if img:
+        try:
+            raw = download(img)
+            if raw:
+                import json
+
+                data = {
+                    "chat_id": config.channel_id(),
+                    "caption": caption,
+                    "parse_mode": "HTML",
+                    "reply_markup": json.dumps({"inline_keyboard": [[{"text": button_text, "url": url}]]}),
+                }
+                files = {"photo": ("quiz_notification.jpg", raw, "image/jpeg")}
+                return _check(httpx.post(_url("sendPhoto"), data=data, files=files, timeout=30))
+            return send_photo_url(img, caption, button_text, url, parse_mode="HTML")
+        except Exception:
+            pass
+    return send_message(caption, button_text, url, parse_mode="HTML")
 
 
 def download(url: str) -> Optional[bytes]:

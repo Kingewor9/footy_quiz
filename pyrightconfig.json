@@ -1,0 +1,11 @@
+{
+  "include": [
+    "api",
+    "tests"
+  ],
+  "extraPaths": [
+    "api"
+  ],
+  "venvPath": ".",
+  "venv": ".venv"
+}
