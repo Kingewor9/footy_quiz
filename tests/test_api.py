@@ -67,6 +67,33 @@ def test_flow():
     assert c.get("/api/admin/analytics", headers=H(2)).status_code == 403
 
 
+def test_booster_doubles_score():
+    r = c.post("/api/admin/quizzes", json=QUIZ, headers=H(1))
+    qid = r.json()["id"]
+    res = play(50, qid, ["1", "Madrid!", "0"])
+    assert res.status_code == 200
+    assert res.json()["points"] == 35
+    assert res.json().get("boosted") is False
+
+    # Booster doubles score to 70 and sets boosted = True
+    b = c.post(f"/api/quizzes/{qid}/boost", headers=H(50))
+    assert b.status_code == 200
+    assert b.json()["points"] == 70
+    assert b.json()["boosted"] is True
+
+    # Cannot boost twice
+    b_again = c.post(f"/api/quizzes/{qid}/boost", headers=H(50))
+    assert b_again.status_code == 409
+
+    # Leaderboard reflects doubled points
+    lb = c.get("/api/leaderboard", headers=H(50)).json()
+    me_row = next(r for r in lb["rows"] if r["user_id"] == 50)
+    assert me_row["points"] == 70
+
+    # Cannot boost quiz not played
+    assert c.post("/api/quizzes/invalid-id/boost", headers=H(50)).status_code == 404
+
+
 def test_quiz_time_limit_and_whole_second_timing(monkeypatch):
     assert c.post("/api/admin/quizzes", json=dict(QUIZ, max_seconds=0), headers=H(1)).status_code == 422
     r = c.post("/api/admin/quizzes", json=dict(QUIZ, max_seconds=5), headers=H(1))

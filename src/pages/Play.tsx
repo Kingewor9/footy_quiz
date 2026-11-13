@@ -111,7 +111,12 @@ export default function Play({
   if (result)
     return (
       <div className="page play">
-        <ScoreCard r={result} onHome={onExit} onLeaderboard={onLeaderboard} />
+        <ScoreCard
+          r={result}
+          onHome={onExit}
+          onLeaderboard={onLeaderboard}
+          onResultUpdate={setResult}
+        />
       </div>
     )
 

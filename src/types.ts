@@ -55,6 +55,7 @@ export interface QuizResult {
   results: QuestionResult[]
   rank: number | null
   players: number
+  boosted?: boolean
 }
 export interface BoardRow {
   rank: number

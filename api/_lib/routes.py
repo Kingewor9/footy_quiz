@@ -51,6 +51,7 @@ def result_payload(d, quiz: dict, attempt: dict) -> dict:
         "results": attempt["results"],
         "rank": mine["rank"] if mine else None,
         "players": len(rows),
+        "boosted": bool(attempt.get("boosted", False)),
     }
 
 
@@ -173,6 +174,30 @@ def quiz_result(qid: str, user: dict = Depends(current_user)):
     if not quiz or not attempt:
         raise HTTPException(404, "No result yet for this quiz.")
     return result_payload(d, quiz, attempt)
+
+
+@router.post("/quizzes/{qid}/boost")
+def boost_quiz(qid: str, user: dict = Depends(current_user)):
+    d = db()
+    quiz = d.quizzes.find_one({"_id": qid})
+    if not quiz:
+        raise HTTPException(404, "Quiz not found.")
+    attempt = d.attempts.find_one({"quiz_id": qid, "user_id": user["id"], "submitted_at": {"$ne": None}})
+    if not attempt:
+        raise HTTPException(404, "You haven't completed this quiz yet.")
+    if attempt.get("boosted"):
+        raise HTTPException(409, "Booster has already been used for this quiz.")
+
+    base_points = attempt["points"]
+    new_points = base_points * 2
+    claimed = d.attempts.find_one_and_update(
+        {"_id": attempt["_id"], "boosted": {"$ne": True}},
+        {"$set": {"points": new_points, "boosted": True, "boosted_at": now(), "base_points": base_points}},
+        return_document=True,
+    )
+    if not claimed:
+        raise HTTPException(409, "Booster has already been used for this quiz.")
+    return result_payload(d, quiz, claimed)
 
 
 @router.get("/leaderboard")

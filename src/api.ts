@@ -39,6 +39,7 @@ export const api = {
   start: (id: string) => post<StartedQuiz>(`/quizzes/${id}/start`),
   submit: (id: string, answers: Record<string, string>) => post<QuizResult>(`/quizzes/${id}/submit`, { answers }),
   result: (id: string) => req<QuizResult>(`/quizzes/${id}/result`),
+  boost: (id: string) => post<QuizResult>(`/quizzes/${id}/boost`),
   leaderboard: () => req<Board>('/leaderboard'),
   admin: {
     quizzes: () => req<AdminQuiz[]>('/admin/quizzes'),
