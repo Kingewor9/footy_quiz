@@ -35,9 +35,5 @@ def app_tz() -> ZoneInfo:
     return ZoneInfo(env("APP_TZ", "UTC"))
 
 
-def cron_secret() -> str:
-    return env("CRON_SECRET")
-
-
 def quiz_notification_image_url() -> str:
     return env("QUIZ_NOTIFICATION_IMAGE_URL", "https://ibb.co/B5RgyFsH")

@@ -1,5 +1,5 @@
 import { initData } from './telegram'
-import type { AdminQuiz, Analytics, Board, CreateOutcome, Me, QuizPayload, QuizResult, QuizSummary, StartedQuiz } from './types'
+import type { AdminQuiz, Analytics, Board, CreateOutcome, Me, QuizPayload, QuizResult, QuizSummary, StartedQuiz, WinnerCardData, WinnerCardDay } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -44,12 +44,13 @@ export const api = {
   admin: {
     quizzes: () => req<AdminQuiz[]>('/admin/quizzes'),
     create: (body: QuizPayload) => post<CreateOutcome>('/admin/quizzes', body),
+    publish: (id: string) => post<CreateOutcome>(`/admin/quizzes/${id}/publish`),
     cancel: (id: string) => req<{ ok: boolean }>(`/admin/quizzes/${id}`, { method: 'DELETE' }),
     analytics: () => req<Analytics>('/admin/analytics'),
-    triggerScheduler: (forceTodayWinner = false) =>
-      post<{ ok: boolean; published: number; winners_announced: string[]; error?: string | null }>(
-        `/admin/scheduler/tick?force_today_winner=${forceTodayWinner}`
-      ),
+    winnerDays: () => req<WinnerCardDay[]>('/admin/winner-card/days'),
+    winnerCard: (day?: string) => req<WinnerCardData>(`/admin/winner-card${day ? `?day=${day}` : ''}`),
+    saveWinnerDraft: (day: string, caption?: string) => post<{ ok: boolean; day: string; status: string }>('/admin/winner-card/save-draft', { day, caption }),
+    postWinnerCard: (day: string, caption?: string) => post<{ ok: boolean; day: string; status: string; sent_at?: string }>('/admin/winner-card/post', { day, caption }),
   },
 }
 

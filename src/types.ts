@@ -80,11 +80,10 @@ export interface Board {
 export interface AdminQuiz {
   id: string
   title: string
-  status: 'scheduled' | 'live' | 'publishing'
+  status: 'draft' | 'scheduled' | 'live' | 'publishing' | 'cancelled'
   question_count: number
   max_seconds: number
   expires_hours?: number
-  scheduled_at: string | null
   posted_at: string | null
   players: number
   notify_error: string | null
@@ -109,15 +108,53 @@ export interface QuestionPayload {
 }
 export interface CreateOutcome {
   id: string
-  status: 'live' | 'scheduled'
+  status: 'live' | 'draft'
   notified: boolean
   error: string | null
-  scheduled_at?: string
 }
 export interface QuizPayload {
   title: string
-  scheduled_at: string | null
   max_seconds: number
   expires_hours?: number
+  status?: 'live' | 'draft'
   questions: QuestionPayload[]
+}
+
+export interface WinnerCardDay {
+  day: string
+  label: string
+  status: 'sent' | 'draft' | 'unsent' | 'no_plays'
+  players: number
+  sent_at: string | null
+}
+
+export interface WinnerCardData {
+  day: string
+  day_label: string
+  has_data: boolean
+  players: number
+  winner: {
+    user_id: number
+    name: string
+    points: number
+    time_ms: number
+    photo_url?: string | null
+  } | null
+  second: {
+    user_id: number
+    name: string
+    points: number
+    time_ms: number
+  } | null
+  third: {
+    user_id: number
+    name: string
+    points: number
+    time_ms: number
+  } | null
+  caption: string
+  card_image?: string
+  status: 'ready' | 'draft' | 'sent' | 'none'
+  sent_at?: string | null
+  message?: string
 }

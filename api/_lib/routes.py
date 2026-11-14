@@ -1,47 +1,21 @@
-import asyncio
-import hmac
+import base64
 import math
 import uuid
-from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from pymongo.errors import DuplicateKeyError
 
-from . import config, jobs
+from . import config, jobs, telegram
 from .auth import admin_user, current_user
 from .db import db
 from .grading import grade, public_question
 from .leaderboard import board_for_day, day_key, next_reset, now
-from .models import QuizIn, SubmitIn
+from .models import QuizIn, SubmitIn, WinnerCardActionIn
+from .winner_card import build_card, fmt_time
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Start continuous background worker that runs every 20 seconds while server is up
-    stop_event = asyncio.Event()
-
-    async def scheduler_worker():
-        while not stop_event.is_set():
-            try:
-                d = db()
-                jobs.publish_due(d)
-                jobs.announce_winners(d)
-            except Exception:
-                pass
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=20)
-            except asyncio.TimeoutError:
-                pass
-
-    task = asyncio.create_task(scheduler_worker())
-    yield
-    stop_event.set()
-    task.cancel()
-
-
-app = FastAPI(title="Footy Quiz API", lifespan=lifespan)
+app = FastAPI(title="Footy Quiz API")
 router = APIRouter(prefix="/api")
 
 DEFAULT_EXPIRES_HOURS = 24
@@ -55,15 +29,6 @@ def iso(dt):
 
 def snapshot(user: dict) -> dict:
     return {k: user.get(k) for k in ("id", "name", "username", "photo_url")}
-
-
-def check_scheduler_passive(d):
-    """Self-healing check on user requests so serverless instances also publish due quizzes immediately."""
-    try:
-        jobs.publish_due(d)
-        jobs.announce_winners(d)
-    except Exception:
-        pass
 
 
 def is_quiz_expired(q: dict) -> bool:
@@ -109,7 +74,6 @@ def health():
 @router.get("/me")
 def me(user: dict = Depends(current_user)):
     d = db()
-    check_scheduler_passive(d)
     d.users.update_one(
         {"_id": user["id"]},
         {"$set": {**snapshot(user), "last_seen": now()}, "$setOnInsert": {"first_seen": now()}},
@@ -127,7 +91,6 @@ def me(user: dict = Depends(current_user)):
 @router.get("/quizzes")
 def live_quizzes(user: dict = Depends(current_user)):
     d = db()
-    check_scheduler_passive(d)
     all_live = list(d.quizzes.find({"status": "live"}).sort("posted_at", -1))
     quizzes = [q for q in all_live if not is_quiz_expired(q)]
     mine = {a["quiz_id"]: a for a in d.attempts.find({"user_id": user["id"], "quiz_id": {"$in": [q["_id"] for q in quizzes]}})}
@@ -252,7 +215,6 @@ def boost_quiz(qid: str, user: dict = Depends(current_user)):
 @router.get("/leaderboard")
 def leaderboard(day: Optional[str] = Query(None), user: dict = Depends(current_user)):
     d = db()
-    check_scheduler_passive(d)
     n = now()
     key = day or day_key(n)
     rows = board_for_day(d, key)
@@ -273,6 +235,7 @@ def create_quiz(body: QuizIn, user: dict = Depends(admin_user)):
     d = db()
     questions = [{**q.model_dump(), "id": uuid.uuid4().hex[:8]} for q in body.questions]
     expires_hours = body.expires_hours or DEFAULT_EXPIRES_HOURS
+    is_draft = body.status == "draft"
     quiz = {
         "_id": uuid.uuid4().hex[:10],
         "title": body.title.strip(),
@@ -281,23 +244,42 @@ def create_quiz(body: QuizIn, user: dict = Depends(admin_user)):
         "expires_hours": expires_hours,
         "created_by": user["id"],
         "created_at": now(),
-        "scheduled_at": body.scheduled_at,
-        "status": "scheduled",
+        "status": "draft" if is_draft else "publishing",
         "posted_at": None,
         "expires_at": None,
     }
-    later = body.scheduled_at and body.scheduled_at > now()
+    if is_draft:
+        d.quizzes.insert_one(quiz)
+        return {"id": quiz["_id"], "status": "draft", "notified": False, "error": None}
+
     d.quizzes.insert_one(quiz)
-    if later:
-        return {"id": quiz["_id"], "status": "scheduled", "scheduled_at": iso(body.scheduled_at), "notified": False, "error": None}
     outcome = jobs.publish_quiz(d, quiz)
     return {"id": quiz["_id"], "status": "live", **outcome}
+
+
+@router.post("/admin/quizzes/{qid}/publish")
+def publish_draft_quiz(qid: str, user: dict = Depends(admin_user)):
+    d = db()
+    q = d.quizzes.find_one_and_update(
+        {"_id": qid, "status": {"$in": ["draft", "scheduled"]}},
+        {"$set": {"status": "publishing", "publishing_started_at": now()}},
+    )
+    if not q:
+        existing = d.quizzes.find_one({"_id": qid})
+        if not existing:
+            raise HTTPException(404, "Quiz not found.")
+        if existing.get("status") == "publishing":
+            raise HTTPException(409, "Quiz is already being published.")
+        if existing.get("status") == "live":
+            raise HTTPException(409, "Quiz is already live.")
+        raise HTTPException(400, f"Cannot publish quiz with status '{existing.get('status')}'.")
+    outcome = jobs.publish_quiz(d, q)
+    return {"id": qid, "status": "live", **outcome}
 
 
 @router.get("/admin/quizzes")
 def admin_quizzes(user: dict = Depends(admin_user)):
     d = db()
-    check_scheduler_passive(d)
     out = []
     for q in d.quizzes.find({"status": {"$ne": "cancelled"}}).sort("created_at", -1).limit(20):
         out.append(
@@ -308,7 +290,6 @@ def admin_quizzes(user: dict = Depends(admin_user)):
                 "question_count": len(q["questions"]),
                 "max_seconds": q.get("max_seconds", DEFAULT_MAX_SECONDS),
                 "expires_hours": q.get("expires_hours", DEFAULT_EXPIRES_HOURS),
-                "scheduled_at": iso(q.get("scheduled_at")),
                 "posted_at": iso(q.get("posted_at")),
                 "players": d.attempts.count_documents({"quiz_id": q["_id"], "submitted_at": {"$ne": None}}),
                 "notify_error": q.get("notify_error"),
@@ -319,9 +300,9 @@ def admin_quizzes(user: dict = Depends(admin_user)):
 
 @router.delete("/admin/quizzes/{qid}")
 def cancel_quiz(qid: str, user: dict = Depends(admin_user)):
-    r = db().quizzes.update_one({"_id": qid, "status": "scheduled"}, {"$set": {"status": "cancelled"}})
+    r = db().quizzes.update_one({"_id": qid, "status": {"$in": ["scheduled", "draft"]}}, {"$set": {"status": "cancelled"}})
     if not r.modified_count:
-        raise HTTPException(400, "Only scheduled quizzes can be cancelled.")
+        raise HTTPException(400, "Only draft or scheduled quizzes can be cancelled.")
     return {"ok": True}
 
 
@@ -366,43 +347,189 @@ def analytics(user: dict = Depends(admin_user)):
     }
 
 
-# ---------------------------------------------------------------- scheduler hook
-@router.get("/cron/tick")
-def tick(
-    authorization: Optional[str] = Header(None),
-    key: Optional[str] = Query(None),
-    x_vercel_cron: Optional[str] = Header(None),
-):
-    secret = config.cron_secret()
-    given = (authorization or "").removeprefix("Bearer ").strip() or (key or "")
-    is_authed = bool(x_vercel_cron) or (secret and hmac.compare_digest(given, secret))
-    if not is_authed:
-        raise HTTPException(401, "Bad cron secret.")
-    d = db()
-    return {"published": jobs.publish_due(d), "winners_announced": jobs.announce_winners(d)}
+# ---------------------------------------------------------------- winner card management
+def concluded_day_label(day: str) -> str:
+    try:
+        parsed_day = datetime.strptime(day, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Invalid day format. Expected YYYY-MM-DD.")
+    if parsed_day.isoformat() != day:
+        raise HTTPException(400, "Invalid day format. Expected YYYY-MM-DD.")
+    if parsed_day >= now().astimezone(config.app_tz()).date():
+        raise HTTPException(400, "Winner announcements are only available for concluded days.")
+    return parsed_day.strftime("%A, %d %B %Y")
 
 
-@router.post("/admin/scheduler/tick")
-def admin_tick(force_today_winner: bool = Query(False), user: dict = Depends(admin_user)):
+def make_winner_caption(w: dict, rows: list, label: str) -> str:
+    medals = ["2nd", "3rd"]
+    runners = "".join(f"\n{medals[i]}: {r['name']} ({r['points']} pts)" for i, r in enumerate(rows[1:3]))
+    return (
+        f"Quiz champion for {label}\n\n"
+        f"{w['name']} won with {w['points']} points in {fmt_time(w['time_ms'])}.{runners}\n\n"
+        f"A fresh leaderboard is open now. Come and take the top spot."
+    )
+
+
+@router.get("/admin/winner-card/days")
+def admin_winner_days(user: dict = Depends(admin_user)):
     d = db()
-    published = jobs.publish_due(d)
-    force_day = day_key(now()) if force_today_winner else None
-    announced = jobs.announce_winners(d, force_day=force_day)
-    last_error = None
-    if force_day and not announced:
-        rec = d.winners.find_one({"_id": force_day})
-        if rec and rec.get("last_error"):
-            last_error = rec["last_error"]
-        elif not board_for_day(d, force_day):
-            last_error = f"No quiz attempts found for {force_day}."
-        elif not telegram.configured():
-            last_error = "Telegram bot is not configured (check BOT_TOKEN and CHANNEL_ID)."
+    n = now()
+    days = []
+    # Concluded days: 1 to 7 days back
+    for back in range(1, 8):
+        dt = n - timedelta(days=back)
+        k = day_key(dt)
+        lbl = dt.astimezone(config.app_tz()).strftime("%A, %d %b %Y")
+        rec = d.winners.find_one({"_id": k})
+        count = d.attempts.count_documents({"day_key": k, "submitted_at": {"$ne": None}})
+        status = rec.get("status") if rec and rec.get("status") in ("sent", "draft") else ("unsent" if count > 0 else "no_plays")
+        days.append({
+            "day": k,
+            "label": lbl,
+            "status": status,
+            "players": count,
+            "sent_at": iso(rec.get("sent_at")) if rec else None,
+        })
+    return days
+
+
+@router.get("/admin/winner-card")
+def admin_winner_card(day: Optional[str] = Query(None), user: dict = Depends(admin_user)):
+    d = db()
+    target_day = day or day_key(now() - timedelta(days=1))
+    label = concluded_day_label(target_day)
+
+    rows = board_for_day(d, target_day)
+    existing = d.winners.find_one({"_id": target_day})
+    status = existing.get("status") if existing else "ready"
+    if status not in ("draft", "sent"):
+        status = "ready"
+    sent_at = existing.get("sent_at") if existing else None
+
+    if not rows:
+        return {
+            "day": target_day,
+            "day_label": label,
+            "has_data": False,
+            "players": 0,
+            "winner": None,
+            "second": None,
+            "third": None,
+            "caption": "",
+            "card_image": None,
+            "status": "none",
+            "sent_at": iso(sent_at),
+            "message": f"No quiz attempts recorded for {label}.",
+        }
+
+    w = rows[0]
+    second = rows[1] if len(rows) > 1 else None
+    third = rows[2] if len(rows) > 2 else None
+    default_caption = make_winner_caption(w, rows, label)
+    caption = (existing.get("caption") if existing and existing.get("caption") else default_caption)
+
+    # Generate the winner card PNG and base64 preview
+    photo = telegram.profile_photo(w["user_id"], w.get("photo_url"))
+    png = build_card(w["name"], w["points"], w["time_ms"], label, photo, config.env("CHANNEL_HANDLE"))
+    b64_img = f"data:image/png;base64,{base64.b64encode(png).decode('ascii')}"
+
     return {
-        "ok": True,
-        "published": published,
-        "winners_announced": announced,
-        "error": last_error,
+        "day": target_day,
+        "day_label": label,
+        "has_data": True,
+        "players": len(rows),
+        "winner": {"user_id": w["user_id"], "name": w["name"], "points": w["points"], "time_ms": w["time_ms"], "photo_url": w.get("photo_url")},
+        "second": {"user_id": second["user_id"], "name": second["name"], "points": second["points"], "time_ms": second["time_ms"]} if second else None,
+        "third": {"user_id": third["user_id"], "name": third["name"], "points": third["points"], "time_ms": third["time_ms"]} if third else None,
+        "caption": caption,
+        "card_image": b64_img,
+        "status": status,
+        "sent_at": iso(sent_at),
     }
+
+
+@router.post("/admin/winner-card/save-draft")
+def admin_save_winner_draft(body: WinnerCardActionIn, user: dict = Depends(admin_user)):
+    d = db()
+    label = concluded_day_label(body.day)
+    rows = board_for_day(d, body.day)
+    if not rows:
+        raise HTTPException(400, f"No attempts recorded for {body.day}.")
+    existing = d.winners.find_one({"_id": body.day})
+    if existing and existing.get("status") in ("sent", "posting"):
+        raise HTTPException(409, "This winner announcement has already been posted or is being posted.")
+    caption = body.caption.strip() if body.caption else make_winner_caption(rows[0], rows, label)
+    d.winners.update_one(
+        {"_id": body.day},
+        {
+            "$set": {
+                "day": body.day,
+                "status": "draft",
+                "caption": caption,
+                "winner_id": rows[0]["user_id"],
+                "updated_at": now(),
+            },
+            "$setOnInsert": {"created_at": now()},
+        },
+        upsert=True,
+    )
+    return {"ok": True, "day": body.day, "status": "draft"}
+
+
+@router.post("/admin/winner-card/post")
+def admin_post_winner_card(body: WinnerCardActionIn, user: dict = Depends(admin_user)):
+    d = db()
+    label = concluded_day_label(body.day)
+    rows = board_for_day(d, body.day)
+    if not rows:
+        raise HTTPException(400, f"No attempts recorded for {body.day}.")
+    if not telegram.configured():
+        raise HTTPException(400, "Telegram bot is not configured (check BOT_TOKEN and CHANNEL_ID).")
+
+    w = rows[0]
+    caption = body.caption.strip() if body.caption else make_winner_caption(w, rows, label)
+    photo = telegram.profile_photo(w["user_id"], w.get("photo_url"))
+    png = build_card(w["name"], w["points"], w["time_ms"], label, photo, config.env("CHANNEL_HANDLE"))
+
+    d.winners.update_one(
+        {"_id": body.day},
+        {"$setOnInsert": {"day": body.day, "status": "draft", "created_at": now()}},
+        upsert=True,
+    )
+    claim = d.winners.update_one(
+        {"_id": body.day, "status": {"$nin": ["sent", "posting"]}},
+        {"$set": {"status": "posting", "caption": caption, "winner_id": w["user_id"], "updated_at": now()}},
+    )
+    if not claim.modified_count:
+        raise HTTPException(409, "This winner announcement has already been posted or is being posted.")
+
+    try:
+        telegram.send_photo(png, caption, "Play today's quiz", config.mini_app_link() or "https://t.me")
+    except Exception as e:
+        d.winners.update_one(
+            {"_id": body.day, "status": "posting"},
+            {"$set": {"status": "draft", "last_error": str(e)}},
+        )
+        raise HTTPException(502, f"Failed posting to Telegram: {e}")
+
+    sent_time = now()
+    d.winners.update_one(
+        {"_id": body.day},
+        {
+            "$set": {
+                "day": body.day,
+                "status": "sent",
+                "caption": caption,
+                "winner_id": w["user_id"],
+                "sent_at": sent_time,
+                "last_error": None,
+                "updated_at": sent_time,
+            },
+            "$setOnInsert": {"created_at": sent_time},
+        },
+        upsert=True,
+    )
+    return {"ok": True, "day": body.day, "status": "sent", "sent_at": iso(sent_time)}
 
 
 app.include_router(router)

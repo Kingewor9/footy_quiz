@@ -21,6 +21,6 @@ def db():
     if not _indexed:
         d.attempts.create_index([("quiz_id", 1), ("user_id", 1)], unique=True)
         d.attempts.create_index("day_key")
-        d.quizzes.create_index([("status", 1), ("scheduled_at", 1)])
+        d.quizzes.create_index([("status", 1), ("posted_at", -1)])
         _indexed = True
     return d

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
 import { api } from '../../api'
 import type { AdminQuiz, QuestionPayload } from '../../types'
 
@@ -98,38 +97,33 @@ export default function SendQuiz() {
   const [title, setTitle] = useState('')
   const [maxSeconds, setMaxSeconds] = useState(60)
   const [expiresHours, setExpiresHours] = useState(24)
-  const [when, setWhen] = useState<'now' | 'later'>('now')
-  const [at, setAt] = useState('')
+  const [mode, setMode] = useState<'live' | 'draft'>('live')
   const [qs, setQs] = useState<Draft[]>([blank()])
   const [busy, setBusy] = useState(false)
+  const [publishingId, setPublishingId] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [recent, setRecent] = useState<AdminQuiz[]>([])
-  const [schedulerBusy, setSchedulerBusy] = useState(false)
-  const [forceTodayWinner, setForceTodayWinner] = useState(false)
-  const [schedulerResult, setSchedulerResult] = useState<{ ok: boolean; text: string } | null>(null)
 
   const loadRecent = useCallback(() => {
     api.admin.quizzes().then(setRecent).catch(() => undefined)
   }, [])
   useEffect(loadRecent, [loadRecent])
 
-  const handleRunScheduler = async () => {
-    setSchedulerBusy(true)
-    setSchedulerResult(null)
+  const handlePublish = async (id: string) => {
+    setPublishingId(id)
+    setMsg(null)
     try {
-      const res = await api.admin.triggerScheduler(forceTodayWinner)
-      let summary = `Scheduler executed: ${res.published} quiz${res.published === 1 ? '' : 'zes'} published.`
-      if (res.winners_announced && res.winners_announced.length > 0) {
-        summary += ` Winner card generated & posted for: ${res.winners_announced.join(', ')}.`
-      } else if (forceTodayWinner && res.error) {
-        summary += ` Note: ${res.error}`
+      const res = await api.admin.publish(id)
+      if (res.notified) {
+        setMsg({ ok: true, text: 'Quiz is live and announced on the channel!' })
+      } else {
+        setMsg({ ok: false, text: `Quiz is live, but channel post failed: ${res.error}` })
       }
-      setSchedulerResult({ ok: true, text: summary })
       loadRecent()
-    } catch (err) {
-      setSchedulerResult({ ok: false, text: (err as Error).message || 'Failed to trigger scheduler.' })
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message })
     } finally {
-      setSchedulerBusy(false)
+      setPublishingId(null)
     }
   }
 
@@ -138,17 +132,16 @@ export default function SendQuiz() {
     if (!title.trim()) return setMsg({ ok: false, text: 'Give the quiz a title.' })
     if (!Number.isInteger(maxSeconds) || maxSeconds < 1 || maxSeconds > 3600) return setMsg({ ok: false, text: 'Set a time limit from 1 to 3600 whole seconds.' })
     if (!Number.isInteger(expiresHours) || expiresHours < 1 || expiresHours > 720) return setMsg({ ok: false, text: 'Set an expiration between 1 and 720 hours.' })
-    if (when === 'later' && (!at || new Date(at).getTime() <= Date.now())) return setMsg({ ok: false, text: 'Pick a future date and time.' })
     setBusy(true)
     try {
       const r = await api.admin.create({
         title: title.trim(),
         max_seconds: maxSeconds,
         expires_hours: expiresHours,
-        scheduled_at: when === 'later' ? new Date(at).toISOString() : null,
+        status: mode,
         questions: qs.map(toPayload),
       })
-      if (r.status === 'scheduled') setMsg({ ok: true, text: `Scheduled for ${new Date(r.scheduled_at!).toLocaleString()}.` })
+      if (r.status === 'draft') setMsg({ ok: true, text: 'Quiz saved as draft. You can post it anytime below.' })
       else if (r.notified) setMsg({ ok: true, text: 'Quiz is live and posted in the channel.' })
       else setMsg({ ok: false, text: `Quiz is live, but the channel post failed: ${r.error}` })
       setTitle('')
@@ -179,68 +172,62 @@ export default function SendQuiz() {
           <input id="quiz-expires-hours" className="input" type="number" min={1} max={720} step={1} required value={expiresHours} onChange={(e) => setExpiresHours(Number(e.target.value))} />
         </div>
         <div className="seg">
-          <button className={when === 'now' ? 'on' : ''} onClick={() => setWhen('now')}>Send now</button>
-          <button className={when === 'later' ? 'on' : ''} onClick={() => setWhen('later')}>Schedule</button>
+          <button className={mode === 'live' ? 'on' : ''} onClick={() => setMode('live')}>Send now</button>
+          <button className={mode === 'draft' ? 'on' : ''} onClick={() => setMode('draft')}>Save as draft</button>
         </div>
-        {when === 'later' && <input className="input" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />}
       </div>
 
       {qs.map((d, i) => (
         <QuestionEditor key={d.key} n={i + 1} d={d} canRemove={qs.length > 1} onChange={(nd) => setQs(qs.map((x) => (x.key === d.key ? nd : x)))} onRemove={() => setQs(qs.filter((x) => x.key !== d.key))} />
       ))}
       {qs.length < 30 && <button className="btn ghost block" style={{ marginBottom: 12 }} onClick={() => setQs([...qs, blank()])}>Add question</button>}
-      <button className="btn block" disabled={busy} onClick={submit}>{busy ? 'Working…' : when === 'now' ? 'Send quiz' : 'Schedule quiz'}</button>
-
-      <div className="card stack" style={{ marginTop: 24, border: '1px solid rgba(255, 255, 255, 0.1)' }}>
-        <div className="row between" style={{ alignItems: 'center' }}>
-          <div>
-            <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <RefreshCw size={16} className={schedulerBusy ? 'spin' : ''} />
-              <span>Scheduler & Winner Card</span>
-            </div>
-            <div className="small muted" style={{ marginTop: 4 }}>
-              Manually trigger pending quizzes to go live and post winner cards to Telegram.
-            </div>
-          </div>
-          <button className="btn small" disabled={schedulerBusy} onClick={handleRunScheduler} style={{ minWidth: 140 }}>
-            {schedulerBusy ? 'Running…' : 'Run Scheduler Now'}
-          </button>
-        </div>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginTop: 4 }}>
-          <input
-            type="checkbox"
-            checked={forceTodayWinner}
-            onChange={(e) => setForceTodayWinner(e.target.checked)}
-            style={{ cursor: 'pointer' }}
-          />
-          <span>Announce today's winner card now (force today)</span>
-        </label>
-
-        {schedulerResult && (
-          <div className={`notice ${schedulerResult.ok ? 'ok' : 'err'}`} style={{ marginTop: 6 }}>
-            {schedulerResult.text}
-          </div>
-        )}
-      </div>
+      <button className="btn block" disabled={busy} onClick={submit}>{busy ? 'Working…' : mode === 'live' ? 'Send quiz now' : 'Save as draft'}</button>
 
       {recent.length > 0 && (
         <>
-          <h2>Recent quizzes</h2>
+          <h2 style={{ marginTop: 28 }}>Recent quizzes & drafts</h2>
           {recent.map((q) => (
             <div className="card row" key={q.id}>
               <div className="grow">
-                <div className="name">{q.title}</div>
-                <div className="small muted">
-                  {q.status === 'scheduled' ? `Scheduled ${new Date(q.scheduled_at!).toLocaleString()}` : `${q.players} player${q.players !== 1 ? 's' : ''}`}
+                <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+                  <span className="name">{q.title}</span>
+                  {q.status === 'draft' && (
+                    <span className="chip" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#facc15', fontSize: '0.72rem', padding: '2px 8px' }}>
+                      Draft
+                    </span>
+                  )}
+                  {q.status === 'live' && (
+                    <span className="chip green" style={{ fontSize: '0.72rem', padding: '2px 8px' }}>
+                      Live
+                    </span>
+                  )}
+                </div>
+                <div className="small muted" style={{ marginTop: 2 }}>
+                  {q.status === 'draft'
+                    ? 'Draft · not published yet'
+                    : q.status === 'scheduled'
+                      ? 'Previously scheduled · ready to post manually'
+                      : `${q.players} player${q.players !== 1 ? 's' : ''}`}
                   {' · '}{q.max_seconds}s limit{' · '}{q.expires_hours ?? 24}h expiry
                 </div>
-                {q.notify_error && <div className="small" style={{ color: 'var(--red)' }}>Not posted: {q.notify_error}</div>}
+                {q.notify_error && <div className="small" style={{ color: 'var(--red)', marginTop: 2 }}>Not posted: {q.notify_error}</div>}
               </div>
-              {q.status === 'scheduled' ? (
-                <button className="link" onClick={() => api.admin.cancel(q.id).then(loadRecent)}>Cancel</button>
+              {q.status === 'draft' || q.status === 'scheduled' ? (
+                <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                  <button
+                    className="btn small"
+                    disabled={publishingId === q.id}
+                    onClick={() => handlePublish(q.id)}
+                    style={{ minWidth: 80, padding: '6px 12px' }}
+                  >
+                    {publishingId === q.id ? 'Posting…' : 'Post now'}
+                  </button>
+                  <button className="link" onClick={() => api.admin.cancel(q.id).then(loadRecent)}>
+                    Delete
+                  </button>
+                </div>
               ) : (
-                <span className="chip green">Live</span>
+                <span className="small muted">Active</span>
               )}
             </div>
           ))}

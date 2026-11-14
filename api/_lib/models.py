@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -45,9 +44,16 @@ class QuizIn(BaseModel):
     title: str = Field(min_length=1, max_length=80)
     questions: List[QuestionIn] = Field(min_length=1, max_length=30)
     max_seconds: int = Field(default=60, ge=1, le=3600)
-    scheduled_at: Optional[datetime] = None
     expires_hours: int = Field(default=24, ge=1, le=720)
     expiration_hours: Optional[int] = None
+    status: Literal["live", "draft"] = "live"
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_scheduled_quiz(cls, values):
+        if isinstance(values, dict) and "scheduled_at" in values:
+            raise ValueError("Scheduled quizzes are no longer supported. Save the quiz as a draft instead.")
+        return values
 
     @model_validator(mode="after")
     def resolve_expiration(self):
@@ -58,3 +64,8 @@ class QuizIn(BaseModel):
 
 class SubmitIn(BaseModel):
     answers: dict[str, str] = {}
+
+
+class WinnerCardActionIn(BaseModel):
+    day: str = Field(min_length=10, max_length=10)
+    caption: Optional[str] = None

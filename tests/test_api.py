@@ -2,7 +2,7 @@ import hashlib, hmac, json, os, sys, time
 from datetime import timedelta
 from urllib.parse import urlencode
 
-os.environ.update(MONGODB_URI="mongomock://", DEV_MODE="1", ADMIN_IDS="1", CRON_SECRET="s3cret", APP_TZ="Africa/Lagos", BOT_TOKEN="123:ABC")
+os.environ.update(MONGODB_URI="mongomock://", DEV_MODE="1", ADMIN_IDS="1", APP_TZ="Africa/Lagos", BOT_TOKEN="123:ABC")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
 from fastapi.testclient import TestClient
@@ -125,15 +125,32 @@ def test_tie_break_by_time():
     assert [r["time_ms"] for r in rows] == [10000, 10000]
 
 
-def test_schedule_and_tick():
-    later = (now() + timedelta(hours=1)).isoformat()
-    r = c.post("/api/admin/quizzes", json=dict(QUIZ, title="Later", scheduled_at=later), headers=H(1)).json()
-    assert r["status"] == "scheduled"
-    assert c.get("/api/cron/tick").status_code == 401
-    assert c.get("/api/cron/tick?key=s3cret").json()["published"] == 0
-    db().quizzes.update_one({"_id": r["id"]}, {"$set": {"scheduled_at": now() - timedelta(minutes=1)}})
-    assert c.get("/api/cron/tick", headers={"Authorization": "Bearer s3cret"}).json()["published"] == 1
-    assert db().quizzes.find_one({"_id": r["id"]})["status"] == "live"
+def test_draft_quiz_can_be_manually_published_and_scheduler_routes_are_gone():
+    future = (now() + timedelta(hours=1)).isoformat()
+    scheduled = c.post(
+        "/api/admin/quizzes",
+        json=dict(QUIZ, scheduled_at=future),
+        headers=H(1),
+    )
+    assert scheduled.status_code == 422
+
+    response = c.post(
+        "/api/admin/quizzes",
+        json=dict(QUIZ, title="Draft quiz", status="draft"),
+        headers=H(1),
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "draft" and result["notified"] is False
+    assert not any(q["id"] == result["id"] for q in c.get("/api/quizzes", headers=H(2)).json())
+
+    published = c.post(f"/api/admin/quizzes/{result['id']}/publish", headers=H(1))
+    assert published.status_code == 200 and published.json()["status"] == "live"
+    assert db().quizzes.find_one({"_id": result["id"]})["status"] == "live"
+    assert c.post(f"/api/admin/quizzes/{result['id']}/publish", headers=H(1)).status_code == 409
+
+    assert c.get("/api/cron/tick").status_code == 404
+    assert c.post("/api/admin/scheduler/tick", headers=H(1)).status_code == 404
 
 
 def test_quiz_notification_with_image_and_catchy_text():
@@ -195,19 +212,53 @@ def test_quiz_custom_expiration_hours(monkeypatch):
     assert c.post(f"/api/quizzes/{qid}/start", headers=H(91)).status_code == 404
 
 
-def test_winner_announcement(monkeypatch=None):
-    d = db(); y = (now() - timedelta(days=1))
-    from _lib.leaderboard import day_key
-    key = day_key(y)
-    d.attempts.insert_one({"_id": "w1", "quiz_id": "old", "user_id": 77, "user": {"id": 77, "name": "Samuel Eto'o", "username": "s"}, "started_at": y,
-                           "submitted_at": y, "day_key": key, "points": 80, "time_ms": 61000, "results": []})
+def test_manual_winner_announcement_draft_and_post():
+    d = db()
+    key = "2000-01-02"
+    for uid, name, points, elapsed in [
+        (77, "Samuel Eto'o", 80, 61000),
+        (78, "Second place", 70, 65000),
+        (79, "Third place", 60, 70000),
+    ]:
+        d.attempts.insert_one({
+            "_id": f"winner-{uid}",
+            "quiz_id": "old",
+            "user_id": uid,
+            "user": {"id": uid, "name": name},
+            "started_at": now(),
+            "submitted_at": now(),
+            "day_key": key,
+            "points": points,
+            "time_ms": elapsed,
+            "results": [],
+        })
+
     sent = {}
-    os.environ["CHANNEL_ID"] = "@chan"; os.environ["MINI_APP_LINK"] = "https://t.me/bot/app"
+    os.environ["CHANNEL_ID"] = "@chan"
+    os.environ["MINI_APP_LINK"] = "https://t.me/bot/app"
     telegram.profile_photo = lambda uid, url: None
     telegram.send_photo = lambda png, cap, bt, url: sent.update(png=png, cap=cap)
-    assert jobs.announce_winners(d) == [key]
+
+    preview = c.get(f"/api/admin/winner-card?day={key}", headers=H(1))
+    assert preview.status_code == 200
+    assert preview.json()["status"] == "ready"
+    assert preview.json()["winner"]["name"] == "Samuel Eto'o"
+    assert preview.json()["second"]["name"] == "Second place"
+    assert preview.json()["third"]["name"] == "Third place"
+    assert preview.json()["card_image"].startswith("data:image/png;base64,")
+
+    draft = c.post("/api/admin/winner-card/save-draft", json={"day": key}, headers=H(1))
+    assert draft.status_code == 200 and draft.json()["status"] == "draft"
+
+    posted = c.post("/api/admin/winner-card/post", json={"day": key}, headers=H(1))
+    assert posted.status_code == 200 and posted.json()["status"] == "sent"
     assert sent["png"][:8] == b"\x89PNG\r\n\x1a\n" and "Samuel" in sent["cap"]
-    assert jobs.announce_winners(d) == []   # never announced twice
+    assert c.post("/api/admin/winner-card/post", json={"day": key}, headers=H(1)).status_code == 409
+    assert c.post("/api/admin/winner-card/save-draft", json={"day": key}, headers=H(1)).status_code == 409
+
+    from _lib.leaderboard import day_key
+    today = day_key(now())
+    assert c.post("/api/admin/winner-card/post", json={"day": today}, headers=H(1)).status_code == 400
 
 
 def test_card_and_initdata(tmp_path):
@@ -223,24 +274,6 @@ def test_card_and_initdata(tmp_path):
         auth.validate_init_data(urlencode(fields), "123:ABC"); assert False
     except ValueError:
         pass
-
-
-def test_admin_scheduler_tick_and_vercel_cron():
-    # 1. Test /cron/tick with x-vercel-cron header
-    r = c.get("/api/cron/tick", headers={"x-vercel-cron": "1"})
-    assert r.status_code == 200
-    assert "published" in r.json()
-
-    # 2. Test /admin/scheduler/tick authorization
-    assert c.post("/api/admin/scheduler/tick", headers=H(2)).status_code == 403
-    r_admin = c.post("/api/admin/scheduler/tick", headers=H(1))
-    assert r_admin.status_code == 200
-    assert r_admin.json()["ok"] is True
-
-    # 3. Test force_today_winner
-    r_force = c.post("/api/admin/scheduler/tick?force_today_winner=true", headers=H(1))
-    assert r_force.status_code == 200
-    assert r_force.json()["ok"] is True
 
 
 def test_telegram_image_scraping():
@@ -268,20 +301,26 @@ def test_telegram_image_scraping():
     assert not_img is False and mime == ""
 
 
-def test_passive_scheduler_publishing():
-    # Schedule a quiz in the future
-    future = (now() + timedelta(hours=1)).isoformat()
-    r = c.post("/api/admin/quizzes", json=dict(QUIZ, title="Future Quiz", scheduled_at=future), headers=H(1)).json()
-    assert r["status"] == "scheduled"
-    qid = r["id"]
+def test_legacy_scheduled_quiz_requires_manual_publish():
+    quiz_id = "legacy_scheduled_quiz"
+    d = db()
+    d.quizzes.insert_one({
+        "_id": quiz_id,
+        "title": "Previously scheduled",
+        "questions": [{"id": "q1", **QUIZ["questions"][0]}],
+        "max_seconds": 60,
+        "expires_hours": 24,
+        "status": "scheduled",
+        "scheduled_at": now() - timedelta(minutes=1),
+        "created_at": now(),
+    })
 
-    # Now simulate time reaching due time
-    db().quizzes.update_one({"_id": qid}, {"$set": {"scheduled_at": now() - timedelta(minutes=1)}})
+    result = c.get("/api/admin/quizzes", headers=H(1))
+    legacy_quiz = next(q for q in result.json() if q["id"] == quiz_id)
+    assert legacy_quiz["status"] == "scheduled"
+    assert d.quizzes.find_one({"_id": quiz_id})["status"] == "scheduled"
 
-    # Calling /api/admin/quizzes triggers passive scheduler check and publishes the quiz
-    res = c.get("/api/admin/quizzes", headers=H(1)).json()
-    target = next((q for q in res if q["id"] == qid), None)
-    assert target is not None
-    assert target["status"] == "live"
+    published = c.post(f"/api/admin/quizzes/{quiz_id}/publish", headers=H(1))
+    assert published.status_code == 200 and published.json()["status"] == "live"
 
 
