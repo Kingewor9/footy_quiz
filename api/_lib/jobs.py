@@ -25,7 +25,7 @@ def publish_quiz(db, quiz: dict) -> dict:
                 f"<b>Total points:</b> {total} pts\n"
                 f"<b>Available until:</b> 23:59 {posted.astimezone(config.app_tz()).strftime('%Z')}\n\n"
                 f"Hit the <b>Play Now</b> button below to start!\n\n"
-                f"<i>Powered By Footy Quiz</i>"
+                f"{telegram.watermark_html()}"
             )
             if channel:
                 text = text.replace(

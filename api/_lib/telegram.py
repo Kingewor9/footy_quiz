@@ -1,3 +1,4 @@
+import html
 import json
 import logging
 import re
@@ -66,6 +67,11 @@ def verify_channel_access(chat_id: str, user_id: int) -> dict:
 
 def quiz_link(quiz_id: str) -> str:
     return f"{config.mini_app_link()}?startapp={quiz_id}"
+
+
+def watermark_html() -> str:
+    app_url = config.mini_app_link() or "https://t.me"
+    return f'<a href="{html.escape(app_url, quote=True)}">Powered By Footy Quiz</a>'
 
 
 def _check(r: httpx.Response) -> dict:

@@ -186,7 +186,8 @@ def test_channels_require_post_rights_and_keep_standings_separate(monkeypatch):
     q1 = c.post("/api/admin/quizzes", json={**QUIZ, "channel_id": one_id}, headers=H(1)).json()
     q2 = c.post("/api/admin/quizzes", json={**QUIZ, "channel_id": two_id}, headers=H(990)).json()
     assert q1["notified"] and q2["notified"]
-    assert sent[0]["chat_id"] == one_id and "Powered By Footy Quiz" in sent[0]["caption"]
+    assert sent[0]["chat_id"] == one_id
+    assert '<a href="https://t.me/bot/app">Powered By Footy Quiz</a>' in sent[0]["caption"]
     assert sent[1]["chat_id"] == two_id
 
     assert play(771, q1["id"], ["1", "Madrid!", "0"]).json()["points"] == 35
@@ -235,7 +236,8 @@ def test_channels_require_post_rights_and_keep_standings_separate(monkeypatch):
         headers=H(1),
     )
     assert posted.status_code == 200
-    assert posted_to["chat_id"] == one_id and posted_to["caption"].endswith("Powered By Footy Quiz")
+    assert posted_to["chat_id"] == one_id
+    assert posted_to["caption"].endswith('<a href="https://t.me/bot/app">Powered By Footy Quiz</a>')
 
 
 def test_channel_connection_rejects_bot_without_post_permission(monkeypatch):
@@ -314,6 +316,7 @@ def test_quiz_notification_with_image_and_catchy_text():
     assert "Total points:" in sent["caption"]
     assert "Available until:" in sent["caption"] and "23:59" in sent["caption"]
     assert "Play Now" in sent["caption"]
+    assert '<a href="https://t.me/bot/app">Powered By Footy Quiz</a>' in sent["caption"]
     assert sent["button_text"] == "Play now"
     assert sent["url"] == "https://t.me/bot/app?startapp=quiz_notify_test"
 

@@ -1,5 +1,6 @@
 import base64
 import math
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -618,10 +619,12 @@ def make_winner_caption(w: dict, rows: list, label: str) -> str:
 
 
 def add_notification_watermark(caption: str) -> str:
-    caption = caption.rstrip()
-    if caption.casefold().endswith("powered by footy quiz"):
-        return caption
-    return f"{caption}\n\nPowered By Footy Quiz"
+    caption = re.sub(
+        r"(?is)(?:\s*<a\b[^>]*>\s*Powered By Footy Quiz\s*</a>|\s*<i>\s*Powered By Footy Quiz\s*</i>|\s*Powered By Footy Quiz)\s*$",
+        "",
+        caption,
+    ).rstrip()
+    return f"{caption}\n\n{telegram.watermark_html()}"
 
 
 def winner_scope(d, user: dict, channel_id: Optional[str]):
@@ -732,7 +735,7 @@ def admin_save_winner_draft(body: WinnerCardActionIn, user: dict = Depends(curre
     existing = d.winners.find_one({"_id": record_id})
     if existing and existing.get("status") in ("sent", "posting"):
         raise HTTPException(409, "This winner announcement has already been posted or is being posted.")
-    caption = add_notification_watermark(body.caption.strip() if body.caption else make_winner_caption(rows[0], rows, label))
+    caption = body.caption.strip() if body.caption else make_winner_caption(rows[0], rows, label)
     d.winners.update_one(
         {"_id": record_id},
         {
