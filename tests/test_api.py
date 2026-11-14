@@ -223,3 +223,65 @@ def test_card_and_initdata(tmp_path):
         auth.validate_init_data(urlencode(fields), "123:ABC"); assert False
     except ValueError:
         pass
+
+
+def test_admin_scheduler_tick_and_vercel_cron():
+    # 1. Test /cron/tick with x-vercel-cron header
+    r = c.get("/api/cron/tick", headers={"x-vercel-cron": "1"})
+    assert r.status_code == 200
+    assert "published" in r.json()
+
+    # 2. Test /admin/scheduler/tick authorization
+    assert c.post("/api/admin/scheduler/tick", headers=H(2)).status_code == 403
+    r_admin = c.post("/api/admin/scheduler/tick", headers=H(1))
+    assert r_admin.status_code == 200
+    assert r_admin.json()["ok"] is True
+
+    # 3. Test force_today_winner
+    r_force = c.post("/api/admin/scheduler/tick?force_today_winner=true", headers=H(1))
+    assert r_force.status_code == 200
+    assert r_force.json()["ok"] is True
+
+
+def test_telegram_image_scraping():
+    html_mock = """
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta property="og:image" content="https://i.ibb.co/abc123/banner.jpg" />
+      </head>
+      <body></body>
+    </html>
+    """
+    extracted = telegram.extract_direct_image_url(html_mock)
+    assert extracted == "https://i.ibb.co/abc123/banner.jpg"
+
+    jpeg_magic = b"\xff\xd8\xff\xe0\x00\x10JFIF"
+    is_img, mime = telegram.is_image_bytes(jpeg_magic)
+    assert is_img is True and mime == "image/jpeg"
+
+    png_magic = b"\x89PNG\r\n\x1a\n"
+    is_img, mime = telegram.is_image_bytes(png_magic)
+    assert is_img is True and mime == "image/png"
+
+    not_img, mime = telegram.is_image_bytes(b"<html>not an image</html>")
+    assert not_img is False and mime == ""
+
+
+def test_passive_scheduler_publishing():
+    # Schedule a quiz in the future
+    future = (now() + timedelta(hours=1)).isoformat()
+    r = c.post("/api/admin/quizzes", json=dict(QUIZ, title="Future Quiz", scheduled_at=future), headers=H(1)).json()
+    assert r["status"] == "scheduled"
+    qid = r["id"]
+
+    # Now simulate time reaching due time
+    db().quizzes.update_one({"_id": qid}, {"$set": {"scheduled_at": now() - timedelta(minutes=1)}})
+
+    # Calling /api/admin/quizzes triggers passive scheduler check and publishes the quiz
+    res = c.get("/api/admin/quizzes", headers=H(1)).json()
+    target = next((q for q in res if q["id"] == qid), None)
+    assert target is not None
+    assert target["status"] == "live"
+
+

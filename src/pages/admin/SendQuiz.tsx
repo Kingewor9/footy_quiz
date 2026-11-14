@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { RefreshCw } from 'lucide-react'
 import { api } from '../../api'
 import type { AdminQuiz, QuestionPayload } from '../../types'
 
@@ -103,11 +104,34 @@ export default function SendQuiz() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [recent, setRecent] = useState<AdminQuiz[]>([])
+  const [schedulerBusy, setSchedulerBusy] = useState(false)
+  const [forceTodayWinner, setForceTodayWinner] = useState(false)
+  const [schedulerResult, setSchedulerResult] = useState<{ ok: boolean; text: string } | null>(null)
 
   const loadRecent = useCallback(() => {
     api.admin.quizzes().then(setRecent).catch(() => undefined)
   }, [])
   useEffect(loadRecent, [loadRecent])
+
+  const handleRunScheduler = async () => {
+    setSchedulerBusy(true)
+    setSchedulerResult(null)
+    try {
+      const res = await api.admin.triggerScheduler(forceTodayWinner)
+      let summary = `Scheduler executed: ${res.published} quiz${res.published === 1 ? '' : 'zes'} published.`
+      if (res.winners_announced && res.winners_announced.length > 0) {
+        summary += ` Winner card generated & posted for: ${res.winners_announced.join(', ')}.`
+      } else if (forceTodayWinner && res.error) {
+        summary += ` Note: ${res.error}`
+      }
+      setSchedulerResult({ ok: true, text: summary })
+      loadRecent()
+    } catch (err) {
+      setSchedulerResult({ ok: false, text: (err as Error).message || 'Failed to trigger scheduler.' })
+    } finally {
+      setSchedulerBusy(false)
+    }
+  }
 
   const submit = async () => {
     setMsg(null)
@@ -166,6 +190,39 @@ export default function SendQuiz() {
       ))}
       {qs.length < 30 && <button className="btn ghost block" style={{ marginBottom: 12 }} onClick={() => setQs([...qs, blank()])}>Add question</button>}
       <button className="btn block" disabled={busy} onClick={submit}>{busy ? 'Working…' : when === 'now' ? 'Send quiz' : 'Schedule quiz'}</button>
+
+      <div className="card stack" style={{ marginTop: 24, border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+        <div className="row between" style={{ alignItems: 'center' }}>
+          <div>
+            <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <RefreshCw size={16} className={schedulerBusy ? 'spin' : ''} />
+              <span>Scheduler & Winner Card</span>
+            </div>
+            <div className="small muted" style={{ marginTop: 4 }}>
+              Manually trigger pending quizzes to go live and post winner cards to Telegram.
+            </div>
+          </div>
+          <button className="btn small" disabled={schedulerBusy} onClick={handleRunScheduler} style={{ minWidth: 140 }}>
+            {schedulerBusy ? 'Running…' : 'Run Scheduler Now'}
+          </button>
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginTop: 4 }}>
+          <input
+            type="checkbox"
+            checked={forceTodayWinner}
+            onChange={(e) => setForceTodayWinner(e.target.checked)}
+            style={{ cursor: 'pointer' }}
+          />
+          <span>Announce today's winner card now (force today)</span>
+        </label>
+
+        {schedulerResult && (
+          <div className={`notice ${schedulerResult.ok ? 'ok' : 'err'}`} style={{ marginTop: 6 }}>
+            {schedulerResult.text}
+          </div>
+        )}
+      </div>
 
       {recent.length > 0 && (
         <>

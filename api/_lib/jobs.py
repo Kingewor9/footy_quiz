@@ -1,5 +1,6 @@
 """Work triggered by the /api/cron/tick endpoint: publish scheduled quizzes, announce winners."""
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from . import config, telegram
 from .leaderboard import board_for_day, day_key, now
@@ -57,21 +58,56 @@ def publish_quiz(db, quiz: dict) -> dict:
 
 def publish_due(db) -> int:
     count = 0
-    for q in list(db.quizzes.find({"status": "scheduled", "scheduled_at": {"$lte": now()}})):
-        claimed = db.quizzes.find_one_and_update({"_id": q["_id"], "status": "scheduled"}, {"$set": {"status": "publishing"}})
-        if claimed:
-            publish_quiz(db, claimed)
-            count += 1
+    current_time = now()
+
+    # 1. Recover any quizzes stuck in "publishing" for more than 3 minutes
+    stuck_time = current_time - timedelta(minutes=3)
+    db.quizzes.update_many(
+        {
+            "status": "publishing",
+            "$or": [
+                {"publishing_started_at": {"$lte": stuck_time}},
+                {"scheduled_at": {"$lte": stuck_time}},
+                {"created_at": {"$lte": stuck_time}},
+            ],
+        },
+        {"$set": {"status": "scheduled"}},
+    )
+
+    # 2. Find any scheduled quizzes that are due
+    for q in list(db.quizzes.find({"status": "scheduled"})):
+        sched = q.get("scheduled_at")
+        if sched is None:
+            continue
+        if isinstance(sched, str):
+            try:
+                sched = datetime.fromisoformat(sched.replace("Z", "+00:00"))
+            except Exception:
+                continue
+        if sched.tzinfo is None:
+            sched = sched.replace(tzinfo=timezone.utc)
+
+        if sched <= current_time:
+            claimed = db.quizzes.find_one_and_update(
+                {"_id": q["_id"], "status": "scheduled"},
+                {"$set": {"status": "publishing", "publishing_started_at": current_time}},
+            )
+            if claimed:
+                publish_quiz(db, claimed)
+                count += 1
     return count
 
 
-def announce_winners(db) -> list:
-    """Post a winner card for each finished day (today excluded) that has not been announced."""
+def announce_winners(db, force_day: Optional[str] = None) -> list:
+    """Post a winner card for finished days or a specified day."""
     done = []
     today = now()
-    for back in range(1, 4):
-        key = day_key(today - timedelta(days=back))
-        if db.winners.find_one({"_id": key, "status": "sent"}):
+    days = [force_day] if force_day else [day_key(today - timedelta(days=back)) for back in range(1, 4)]
+
+    for key in days:
+        if not key:
+            continue
+        if not force_day and db.winners.find_one({"_id": key, "status": "sent"}):
             continue
         rows = board_for_day(db, key)
         if not rows or not telegram.configured():
@@ -83,7 +119,7 @@ def announce_winners(db) -> list:
             {"_id": key, "status": "pending", "attempts": {"$lt": 5}, "lock_until": {"$lt": now()}},
             {"$set": {"lock_until": now() + timedelta(minutes=3)}, "$inc": {"attempts": 1}},
         )
-        if not claim:
+        if not claim and not force_day:
             continue
         try:
             w = rows[0]
@@ -98,7 +134,7 @@ def announce_winners(db) -> list:
                 f"A fresh leaderboard is open now. Come and take the top spot."
             )
             telegram.send_photo(png, caption, "Play today's quiz", config.mini_app_link() or "https://t.me")
-            db.winners.update_one({"_id": key}, {"$set": {"status": "sent", "winner_id": w["user_id"], "sent_at": now()}})
+            db.winners.update_one({"_id": key}, {"$set": {"status": "sent", "winner_id": w["user_id"], "sent_at": now(), "last_error": None}})
             done.append(key)
         except Exception as e:
             db.winners.update_one({"_id": key}, {"$set": {"last_error": str(e)}})

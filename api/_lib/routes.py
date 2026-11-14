@@ -1,6 +1,8 @@
+import asyncio
 import hmac
 import math
 import uuid
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Optional
 
@@ -14,7 +16,32 @@ from .grading import grade, public_question
 from .leaderboard import board_for_day, day_key, next_reset, now
 from .models import QuizIn, SubmitIn
 
-app = FastAPI(title="Footy Quiz API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start continuous background worker that runs every 20 seconds while server is up
+    stop_event = asyncio.Event()
+
+    async def scheduler_worker():
+        while not stop_event.is_set():
+            try:
+                d = db()
+                jobs.publish_due(d)
+                jobs.announce_winners(d)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=20)
+            except asyncio.TimeoutError:
+                pass
+
+    task = asyncio.create_task(scheduler_worker())
+    yield
+    stop_event.set()
+    task.cancel()
+
+
+app = FastAPI(title="Footy Quiz API", lifespan=lifespan)
 router = APIRouter(prefix="/api")
 
 DEFAULT_EXPIRES_HOURS = 24
@@ -28,6 +55,15 @@ def iso(dt):
 
 def snapshot(user: dict) -> dict:
     return {k: user.get(k) for k in ("id", "name", "username", "photo_url")}
+
+
+def check_scheduler_passive(d):
+    """Self-healing check on user requests so serverless instances also publish due quizzes immediately."""
+    try:
+        jobs.publish_due(d)
+        jobs.announce_winners(d)
+    except Exception:
+        pass
 
 
 def is_quiz_expired(q: dict) -> bool:
@@ -73,6 +109,7 @@ def health():
 @router.get("/me")
 def me(user: dict = Depends(current_user)):
     d = db()
+    check_scheduler_passive(d)
     d.users.update_one(
         {"_id": user["id"]},
         {"$set": {**snapshot(user), "last_seen": now()}, "$setOnInsert": {"first_seen": now()}},
@@ -90,6 +127,7 @@ def me(user: dict = Depends(current_user)):
 @router.get("/quizzes")
 def live_quizzes(user: dict = Depends(current_user)):
     d = db()
+    check_scheduler_passive(d)
     all_live = list(d.quizzes.find({"status": "live"}).sort("posted_at", -1))
     quizzes = [q for q in all_live if not is_quiz_expired(q)]
     mine = {a["quiz_id"]: a for a in d.attempts.find({"user_id": user["id"], "quiz_id": {"$in": [q["_id"] for q in quizzes]}})}
@@ -214,6 +252,7 @@ def boost_quiz(qid: str, user: dict = Depends(current_user)):
 @router.get("/leaderboard")
 def leaderboard(day: Optional[str] = Query(None), user: dict = Depends(current_user)):
     d = db()
+    check_scheduler_passive(d)
     n = now()
     key = day or day_key(n)
     rows = board_for_day(d, key)
@@ -258,6 +297,7 @@ def create_quiz(body: QuizIn, user: dict = Depends(admin_user)):
 @router.get("/admin/quizzes")
 def admin_quizzes(user: dict = Depends(admin_user)):
     d = db()
+    check_scheduler_passive(d)
     out = []
     for q in d.quizzes.find({"status": {"$ne": "cancelled"}}).sort("created_at", -1).limit(20):
         out.append(
@@ -328,13 +368,41 @@ def analytics(user: dict = Depends(admin_user)):
 
 # ---------------------------------------------------------------- scheduler hook
 @router.get("/cron/tick")
-def tick(authorization: Optional[str] = Header(None), key: Optional[str] = Query(None)):
+def tick(
+    authorization: Optional[str] = Header(None),
+    key: Optional[str] = Query(None),
+    x_vercel_cron: Optional[str] = Header(None),
+):
     secret = config.cron_secret()
     given = (authorization or "").removeprefix("Bearer ").strip() or (key or "")
-    if not secret or not hmac.compare_digest(given, secret):
+    is_authed = bool(x_vercel_cron) or (secret and hmac.compare_digest(given, secret))
+    if not is_authed:
         raise HTTPException(401, "Bad cron secret.")
     d = db()
     return {"published": jobs.publish_due(d), "winners_announced": jobs.announce_winners(d)}
+
+
+@router.post("/admin/scheduler/tick")
+def admin_tick(force_today_winner: bool = Query(False), user: dict = Depends(admin_user)):
+    d = db()
+    published = jobs.publish_due(d)
+    force_day = day_key(now()) if force_today_winner else None
+    announced = jobs.announce_winners(d, force_day=force_day)
+    last_error = None
+    if force_day and not announced:
+        rec = d.winners.find_one({"_id": force_day})
+        if rec and rec.get("last_error"):
+            last_error = rec["last_error"]
+        elif not board_for_day(d, force_day):
+            last_error = f"No quiz attempts found for {force_day}."
+        elif not telegram.configured():
+            last_error = "Telegram bot is not configured (check BOT_TOKEN and CHANNEL_ID)."
+    return {
+        "ok": True,
+        "published": published,
+        "winners_announced": announced,
+        "error": last_error,
+    }
 
 
 app.include_router(router)

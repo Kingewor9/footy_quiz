@@ -46,6 +46,10 @@ export const api = {
     create: (body: QuizPayload) => post<CreateOutcome>('/admin/quizzes', body),
     cancel: (id: string) => req<{ ok: boolean }>(`/admin/quizzes/${id}`, { method: 'DELETE' }),
     analytics: () => req<Analytics>('/admin/analytics'),
+    triggerScheduler: (forceTodayWinner = false) =>
+      post<{ ok: boolean; published: number; winners_announced: string[]; error?: string | null }>(
+        `/admin/scheduler/tick?force_today_winner=${forceTodayWinner}`
+      ),
   },
 }
 
