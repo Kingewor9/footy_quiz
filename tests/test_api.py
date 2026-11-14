@@ -157,6 +157,7 @@ def test_channels_require_post_rights_and_keep_standings_separate(monkeypatch):
     channel_data = {
         "@leagueone": {"id": -100101, "type": "channel", "title": "League One", "username": "leagueone"},
         "@leaguetwo": {"id": -100102, "type": "channel", "title": "League Two", "username": "leaguetwo"},
+        "@leaguethree": {"id": -100103, "type": "channel", "title": "League Three", "username": "leaguethree"},
     }
 
     def get_chat(chat):
@@ -176,29 +177,36 @@ def test_channels_require_post_rights_and_keep_standings_separate(monkeypatch):
 
     one = c.post("/api/admin/channels", json={"username": "@leagueone"}, headers=H(1))
     two = c.post("/api/admin/channels", json={"username": "leaguetwo"}, headers=H(990))
-    assert one.status_code == two.status_code == 200
+    three = c.post("/api/admin/channels", json={"username": "leaguethree"}, headers=H(992))
+    assert one.status_code == two.status_code == three.status_code == 200
     lookup = c.get("/api/admin/channels/lookup?username=leagueone", headers=H(1))
     assert lookup.status_code == 200 and lookup.json()["bot_username"] == "footyquizbot"
-    one_id, two_id = one.json()["id"], two.json()["id"]
+    one_id, two_id, three_id = one.json()["id"], two.json()["id"], three.json()["id"]
     added_admin = c.post("/api/admin/channels", json={"username": "leagueone"}, headers=H(991))
     assert added_admin.status_code == 200 and one_id in [channel["id"] for channel in c.get("/api/admin/channels", headers=H(991)).json()]
 
     q1 = c.post("/api/admin/quizzes", json={**QUIZ, "channel_id": one_id}, headers=H(1)).json()
     q2 = c.post("/api/admin/quizzes", json={**QUIZ, "channel_id": two_id}, headers=H(990)).json()
+    q3 = c.post("/api/admin/quizzes", json={**QUIZ, "channel_id": three_id}, headers=H(992)).json()
     assert q1["notified"] and q2["notified"]
     assert sent[0]["chat_id"] == one_id
     assert '<a href="https://t.me/bot/app">Powered By Footy Quiz</a>' in sent[0]["caption"]
     assert sent[1]["chat_id"] == two_id
 
+    assert not any(q["channel_id"] for q in c.get("/api/quizzes", headers=H(773)).json())
     assert play(771, q1["id"], ["1", "Madrid!", "0"]).json()["points"] == 35
     assert play(772, q1["id"], ["1", "wrong", "1"]).json()["points"] == 10
     assert play(771, q2["id"], ["1", "Madrid!", "0"]).json()["points"] == 35
+    assert play(773, q2["id"], ["1", "Madrid!", "0"]).status_code == 200
+    assert play(773, q3["id"], ["1", "Madrid!", "0"]).status_code == 200
+    visible_to_773 = {q["id"] for q in c.get("/api/quizzes", headers=H(773)).json() if q["channel_id"]}
+    assert visible_to_773 == {q2["id"], q3["id"]}
 
     board_one = c.get(f"/api/channels/{one_id}/leaderboard", headers=H(771)).json()
     board_two = c.get(f"/api/channels/{two_id}/leaderboard", headers=H(771)).json()
     assert board_one["channel"]["title"] == "League One"
     assert [r["user_id"] for r in board_one["rows"]] == [771, 772]
-    assert [r["user_id"] for r in board_two["rows"]] == [771]
+    assert [r["user_id"] for r in board_two["rows"]] == [771, 773]
     assert len(c.get("/api/channels", headers=H(771)).json()) == 2
     assert c.get("/api/me", headers=H(771)).json()["today"]["points"] == 70
     assert c.get("/api/me", headers=H(771)).json()["today"]["channels"] == 2

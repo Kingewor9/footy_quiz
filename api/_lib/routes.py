@@ -110,6 +110,16 @@ def live_quizzes(user: dict = Depends(current_user)):
     d = db()
     all_live = list(d.quizzes.find({"status": "live"}).sort("posted_at", -1))
     quizzes = [q for q in all_live if not is_quiz_expired(q)]
+    member_channel_ids = set(d.attempts.distinct(
+        "channel_id",
+        {
+            "user_id": user["id"],
+            "day_key": day_key(now()),
+            "submitted_at": {"$ne": None},
+            "channel_id": {"$ne": None},
+        },
+    ))
+    quizzes = [q for q in quizzes if not q.get("channel_id") or q["channel_id"] in member_channel_ids]
     mine = {a["quiz_id"]: a for a in d.attempts.find({"user_id": user["id"], "quiz_id": {"$in": [q["_id"] for q in quizzes]}})}
     out = []
     for q in quizzes:
