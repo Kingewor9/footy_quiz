@@ -173,7 +173,6 @@ def test_quiz_notification_with_image_and_catchy_text():
             {"id": "q2", "text": "Q2", "points": 25},
         ],
         "max_seconds": 45,
-        "expires_hours": 48,
     }
 
     res = jobs.publish_quiz(d, quiz_doc)
@@ -184,32 +183,49 @@ def test_quiz_notification_with_image_and_catchy_text():
     assert "Champions League Final Special" in sent["caption"]
     assert "Total questions:" in sent["caption"]
     assert "Total points:" in sent["caption"]
-    assert "Expires:" in sent["caption"] and "48 hours" in sent["caption"]
+    assert "Available until:" in sent["caption"] and "23:59" in sent["caption"]
     assert "Play Now" in sent["caption"]
     assert sent["button_text"] == "Play now"
     assert sent["url"] == "https://t.me/bot/app?startapp=quiz_notify_test"
 
 
-def test_quiz_custom_expiration_hours(monkeypatch):
-    r = c.post("/api/admin/quizzes", json=dict(QUIZ, title="Expiring Quiz", expires_hours=6), headers=H(1))
+def test_quiz_expires_at_daily_leaderboard_reset(monkeypatch):
+    legacy_expiration = c.post(
+        "/api/admin/quizzes",
+        json=dict(QUIZ, expires_hours=6),
+        headers=H(1),
+    )
+    assert legacy_expiration.status_code == 422
+
+    r = c.post("/api/admin/quizzes", json=dict(QUIZ, title="Daily Quiz"), headers=H(1))
     assert r.status_code == 200
     qid = r.json()["id"]
-
-    # Immediately live
     quiz_in_db = db().quizzes.find_one({"_id": qid})
-    assert quiz_in_db["expires_hours"] == 6
-    assert quiz_in_db["expires_at"] is not None
+    from _lib.leaderboard import next_reset
+    resets_at = next_reset(quiz_in_db["posted_at"])
+    assert quiz_in_db["expires_at"] == resets_at
+    assert "expires_hours" not in quiz_in_db
+    db().quizzes.update_one(
+        {"_id": qid},
+        {"$set": {"expires_at": quiz_in_db["posted_at"] + timedelta(hours=24)}},
+    )
 
-    # Available after 2 hours
-    posted = quiz_in_db["posted_at"]
-    monkeypatch.setattr(routes, "now", lambda: posted + timedelta(hours=2))
+    monkeypatch.setattr(routes, "now", lambda: resets_at - timedelta(seconds=1))
     assert any(q["id"] == qid for q in c.get("/api/quizzes", headers=H(2)).json())
-    assert c.post(f"/api/quizzes/{qid}/start", headers=H(90)).status_code == 200
+    started = c.post(f"/api/quizzes/{qid}/start", headers=H(90))
+    assert started.status_code == 200
 
-    # Expired after 7 hours
-    monkeypatch.setattr(routes, "now", lambda: posted + timedelta(hours=7))
+    monkeypatch.setattr(routes, "now", lambda: resets_at)
     assert not any(q["id"] == qid for q in c.get("/api/quizzes", headers=H(2)).json())
     assert c.post(f"/api/quizzes/{qid}/start", headers=H(91)).status_code == 404
+    question_id = started.json()["questions"][0]["id"]
+    submit = c.post(
+        f"/api/quizzes/{qid}/submit",
+        json={"answers": {question_id: "1"}},
+        headers=H(90),
+    )
+    assert submit.status_code == 404
+    assert c.post(f"/api/quizzes/{qid}/boost", headers=H(90)).status_code == 409
 
 
 def test_manual_winner_announcement_draft_and_post():

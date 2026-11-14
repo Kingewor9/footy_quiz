@@ -123,7 +123,7 @@ export default function Home({
                 {q.max_seconds}s
               </span>
               <span className="fixture-meta-tag">
-                {q.expires_hours ?? 24}h live
+                Closes at daily reset
               </span>
               <span className="fixture-meta-tag gold">
                 <Award size={12} />

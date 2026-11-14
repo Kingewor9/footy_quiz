@@ -2,13 +2,13 @@
 from datetime import timedelta
 
 from . import config, telegram
-from .leaderboard import now
+from .leaderboard import next_reset, now
 
 
 def publish_quiz(db, quiz: dict) -> dict:
     """Mark a quiz live and post the channel notification. Returns {notified, error}."""
     notified, error = False, None
-    expires_hours = quiz.get("expires_hours", 24)
+    posted = now()
     if telegram.configured() and config.mini_app_link():
         try:
             total = sum(q["points"] for q in quiz["questions"])
@@ -20,7 +20,7 @@ def publish_quiz(db, quiz: dict) -> dict:
                 f"<b>Title:</b> {title}\n"
                 f"<b>Total questions:</b> {n}\n"
                 f"<b>Total points:</b> {total} pts\n"
-                f"<b>Expires:</b> {expires_hours} hours\n\n"
+                f"<b>Available until:</b> 23:59 {posted.astimezone(config.app_tz()).strftime('%Z')}\n\n"
                 f"Hit the <b>Play Now</b> button below to start!"
             )
             button_label = "Play now"
@@ -36,8 +36,7 @@ def publish_quiz(db, quiz: dict) -> dict:
             error = str(e)
     else:
         error = "BOT_TOKEN, CHANNEL_ID or MINI_APP_LINK is not set, so no channel post was made."
-    posted = now()
-    expires_at = posted + timedelta(hours=expires_hours)
+    expires_at = next_reset(posted)
     db.quizzes.update_one(
         {"_id": quiz["_id"]},
         {
@@ -45,7 +44,6 @@ def publish_quiz(db, quiz: dict) -> dict:
                 "status": "live",
                 "posted_at": posted,
                 "expires_at": expires_at,
-                "expires_hours": expires_hours,
                 "notified": notified,
                 "notify_error": error,
             }

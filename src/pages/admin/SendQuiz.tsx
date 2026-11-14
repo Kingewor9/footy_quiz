@@ -96,7 +96,6 @@ function QuestionEditor({ n, d, onChange, onRemove, canRemove }: { n: number; d:
 export default function SendQuiz() {
   const [title, setTitle] = useState('')
   const [maxSeconds, setMaxSeconds] = useState(60)
-  const [expiresHours, setExpiresHours] = useState(24)
   const [mode, setMode] = useState<'live' | 'draft'>('live')
   const [qs, setQs] = useState<Draft[]>([blank()])
   const [busy, setBusy] = useState(false)
@@ -131,13 +130,11 @@ export default function SendQuiz() {
     setMsg(null)
     if (!title.trim()) return setMsg({ ok: false, text: 'Give the quiz a title.' })
     if (!Number.isInteger(maxSeconds) || maxSeconds < 1 || maxSeconds > 3600) return setMsg({ ok: false, text: 'Set a time limit from 1 to 3600 whole seconds.' })
-    if (!Number.isInteger(expiresHours) || expiresHours < 1 || expiresHours > 720) return setMsg({ ok: false, text: 'Set an expiration between 1 and 720 hours.' })
     setBusy(true)
     try {
       const r = await api.admin.create({
         title: title.trim(),
         max_seconds: maxSeconds,
-        expires_hours: expiresHours,
         status: mode,
         questions: qs.map(toPayload),
       })
@@ -146,7 +143,6 @@ export default function SendQuiz() {
       else setMsg({ ok: false, text: `Quiz is live, but the channel post failed: ${r.error}` })
       setTitle('')
       setMaxSeconds(60)
-      setExpiresHours(24)
       setQs([blank()])
       loadRecent()
     } catch (e) {
@@ -167,14 +163,11 @@ export default function SendQuiz() {
           <label htmlFor="quiz-time-limit">Time limit in seconds (1–3600)</label>
           <input id="quiz-time-limit" className="input" type="number" min={1} max={3600} step={1} required value={maxSeconds} onChange={(e) => setMaxSeconds(Number(e.target.value))} />
         </div>
-        <div className="field">
-          <label htmlFor="quiz-expires-hours">Expiration in hours (e.g. 24)</label>
-          <input id="quiz-expires-hours" className="input" type="number" min={1} max={720} step={1} required value={expiresHours} onChange={(e) => setExpiresHours(Number(e.target.value))} />
-        </div>
         <div className="seg">
           <button className={mode === 'live' ? 'on' : ''} onClick={() => setMode('live')}>Send now</button>
           <button className={mode === 'draft' ? 'on' : ''} onClick={() => setMode('draft')}>Save as draft</button>
         </div>
+        <div className="small muted">Live quizzes close at the daily leaderboard reset.</div>
       </div>
 
       {qs.map((d, i) => (
@@ -208,7 +201,7 @@ export default function SendQuiz() {
                     : q.status === 'scheduled'
                       ? 'Previously scheduled · ready to post manually'
                       : `${q.players} player${q.players !== 1 ? 's' : ''}`}
-                  {' · '}{q.max_seconds}s limit{' · '}{q.expires_hours ?? 24}h expiry
+                  {' · '}{q.max_seconds}s limit{q.status !== 'draft' ? ' · closes at daily reset' : ''}
                 </div>
                 {q.notify_error && <div className="small" style={{ color: 'var(--red)', marginTop: 2 }}>Not posted: {q.notify_error}</div>}
               </div>

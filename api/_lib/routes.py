@@ -1,7 +1,7 @@
 import base64
 import math
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
@@ -18,7 +18,6 @@ from .winner_card import build_card, fmt_time
 app = FastAPI(title="Footy Quiz API")
 router = APIRouter(prefix="/api")
 
-DEFAULT_EXPIRES_HOURS = 24
 DEFAULT_MAX_SECONDS = 60
 SUBMIT_GRACE_SECONDS = 5
 
@@ -34,11 +33,17 @@ def snapshot(user: dict) -> dict:
 def is_quiz_expired(q: dict) -> bool:
     if not q or q.get("status") != "live":
         return True
-    if "expires_at" in q and q["expires_at"]:
-        return q["expires_at"] <= now()
-    hours = q.get("expires_hours", DEFAULT_EXPIRES_HOURS)
     posted = q.get("posted_at")
-    return not posted or posted < now() - timedelta(hours=hours)
+    if isinstance(posted, str):
+        try:
+            posted = datetime.fromisoformat(posted.replace("Z", "+00:00"))
+        except ValueError:
+            return True
+    if not isinstance(posted, datetime):
+        return True
+    if posted.tzinfo is None:
+        posted = posted.replace(tzinfo=timezone.utc)
+    return next_reset(posted) <= now()
 
 
 def get_live_quiz(d, qid: str) -> dict:
@@ -105,7 +110,6 @@ def live_quizzes(user: dict = Depends(current_user)):
                 "question_count": len(q["questions"]),
                 "total_points": sum(x["points"] for x in q["questions"]),
                 "max_seconds": q.get("max_seconds", DEFAULT_MAX_SECONDS),
-                "expires_hours": q.get("expires_hours", DEFAULT_EXPIRES_HOURS),
                 "posted_at": iso(q["posted_at"]),
                 "played": done,
                 "score": a["points"] if done else None,
@@ -150,9 +154,9 @@ def start_quiz(qid: str, user: dict = Depends(current_user)):
 @router.post("/quizzes/{qid}/submit")
 def submit_quiz(qid: str, body: SubmitIn, user: dict = Depends(current_user)):
     d = db()
-    quiz = d.quizzes.find_one({"_id": qid, "status": "live"})
+    quiz = get_live_quiz(d, qid)
     attempt = d.attempts.find_one({"quiz_id": qid, "user_id": user["id"]})
-    if not quiz or not attempt:
+    if not attempt:
         raise HTTPException(404, "Quiz not found. Start it first.")
     if attempt.get("submitted_at"):
         raise HTTPException(409, "already_played")
@@ -194,6 +198,8 @@ def boost_quiz(qid: str, user: dict = Depends(current_user)):
     quiz = d.quizzes.find_one({"_id": qid})
     if not quiz:
         raise HTTPException(404, "Quiz not found.")
+    if is_quiz_expired(quiz):
+        raise HTTPException(409, "This quiz has closed for the day.")
     attempt = d.attempts.find_one({"quiz_id": qid, "user_id": user["id"], "submitted_at": {"$ne": None}})
     if not attempt:
         raise HTTPException(404, "You haven't completed this quiz yet.")
@@ -234,14 +240,12 @@ def leaderboard(day: Optional[str] = Query(None), user: dict = Depends(current_u
 def create_quiz(body: QuizIn, user: dict = Depends(admin_user)):
     d = db()
     questions = [{**q.model_dump(), "id": uuid.uuid4().hex[:8]} for q in body.questions]
-    expires_hours = body.expires_hours or DEFAULT_EXPIRES_HOURS
     is_draft = body.status == "draft"
     quiz = {
         "_id": uuid.uuid4().hex[:10],
         "title": body.title.strip(),
         "questions": questions,
         "max_seconds": body.max_seconds,
-        "expires_hours": expires_hours,
         "created_by": user["id"],
         "created_at": now(),
         "status": "draft" if is_draft else "publishing",
@@ -289,7 +293,6 @@ def admin_quizzes(user: dict = Depends(admin_user)):
                 "status": q["status"],
                 "question_count": len(q["questions"]),
                 "max_seconds": q.get("max_seconds", DEFAULT_MAX_SECONDS),
-                "expires_hours": q.get("expires_hours", DEFAULT_EXPIRES_HOURS),
                 "posted_at": iso(q.get("posted_at")),
                 "players": d.attempts.count_documents({"quiz_id": q["_id"], "submitted_at": {"$ne": None}}),
                 "notify_error": q.get("notify_error"),

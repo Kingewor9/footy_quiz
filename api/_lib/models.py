@@ -44,22 +44,17 @@ class QuizIn(BaseModel):
     title: str = Field(min_length=1, max_length=80)
     questions: List[QuestionIn] = Field(min_length=1, max_length=30)
     max_seconds: int = Field(default=60, ge=1, le=3600)
-    expires_hours: int = Field(default=24, ge=1, le=720)
-    expiration_hours: Optional[int] = None
     status: Literal["live", "draft"] = "live"
 
     @model_validator(mode="before")
     @classmethod
-    def reject_scheduled_quiz(cls, values):
-        if isinstance(values, dict) and "scheduled_at" in values:
-            raise ValueError("Scheduled quizzes are no longer supported. Save the quiz as a draft instead.")
+    def reject_legacy_quiz_settings(cls, values):
+        if isinstance(values, dict):
+            if "scheduled_at" in values:
+                raise ValueError("Scheduled quizzes are no longer supported. Save the quiz as a draft instead.")
+            if "expires_hours" in values or "expiration_hours" in values:
+                raise ValueError("Quizzes close at the daily leaderboard reset; expiration is not configurable.")
         return values
-
-    @model_validator(mode="after")
-    def resolve_expiration(self):
-        if self.expiration_hours is not None:
-            self.expires_hours = self.expiration_hours
-        return self
 
 
 class SubmitIn(BaseModel):

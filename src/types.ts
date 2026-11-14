@@ -15,7 +15,6 @@ export interface QuizSummary {
   question_count: number
   total_points: number
   max_seconds: number
-  expires_hours?: number
   posted_at: string
   played: boolean
   score: number | null
@@ -83,7 +82,6 @@ export interface AdminQuiz {
   status: 'draft' | 'scheduled' | 'live' | 'publishing' | 'cancelled'
   question_count: number
   max_seconds: number
-  expires_hours?: number
   posted_at: string | null
   players: number
   notify_error: string | null
@@ -115,7 +113,6 @@ export interface CreateOutcome {
 export interface QuizPayload {
   title: string
   max_seconds: number
-  expires_hours?: number
   status?: 'live' | 'draft'
   questions: QuestionPayload[]
 }

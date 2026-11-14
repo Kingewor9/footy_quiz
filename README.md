@@ -25,7 +25,8 @@ tests/              backend tests (pytest, in-memory Mongo)
 - **Several quizzes a day** add up on that day's leaderboard. The day runs 00:00-23:59 in `APP_TZ`.
 - Leaderboard arrows show how many places the most recent quiz moved a player (green up, red down, dash = no
   change or first quiz of the day).
-- A quiz stays playable for 24 hours after it is posted.
+- Quizzes posted today stay playable until the next leaderboard reset at midnight in `APP_TZ`, then close.
+  Their one-play limit does not reset: a closed quiz cannot be replayed the next day.
 - **Draft quizzes:** save quizzes as drafts and post them manually from the Admin page when ready.
 - **Winner cards:** after a leaderboard day concludes, open **Admin → Winner Card** to review its top three,
   preview the 1080x1080 winner image, edit the caption, save it as a draft, or post it to the channel.
