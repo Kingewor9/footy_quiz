@@ -3,13 +3,15 @@ import {
   Trophy,
   Crown,
   Clock,
+  ChevronRight,
   TrendingUp,
   TrendingDown,
   Minus
 } from 'lucide-react'
 import Avatar from '../components/Avatar'
+import ChannelMark from '../components/ChannelMark'
 import { api, fmtTime } from '../api'
-import type { Board, BoardRow } from '../types'
+import type { Board, BoardRow, Channel } from '../types'
 
 function useCountdown(target?: string) {
   const [left, setLeft] = useState('')
@@ -51,27 +53,39 @@ function MoveIndicator({ r }: { r: BoardRow }) {
   )
 }
 
-export default function Leaderboard({ myId }: { myId: number }) {
+export default function Leaderboard({ myId, initialChannelId }: { myId: number; initialChannelId?: string | null }) {
   const [board, setBoard] = useState<Board | null>(null)
+  const [channels, setChannels] = useState<Channel[] | null>(null)
+  const [activeChannel, setActiveChannel] = useState<string | null>(initialChannelId ?? null)
   const [err, setErr] = useState('')
   const left = useCountdown(board?.resets_at)
 
   useEffect(() => {
-    api.leaderboard().then(setBoard).catch((e) => setErr(e.message))
-  }, [])
+    api.channels().then((items) => {
+      setChannels(items)
+      if (initialChannelId && items.some((c) => c.id === initialChannelId)) setActiveChannel(initialChannelId)
+    }).catch((e) => setErr(e.message))
+  }, [initialChannelId])
+
+  useEffect(() => {
+    if (!activeChannel) {
+      setBoard(null)
+      return
+    }
+    api.channelLeaderboard(activeChannel).then(setBoard).catch((e) => setErr(e.message))
+  }, [activeChannel])
 
   const top3 = board?.rows.slice(0, 3) || []
 
   return (
     <div className="page leaderboard-page">
-      {/* Page Title & Countdown Badge */}
       <div className="lb-header">
         <div>
-          <h1>Leaderboard</h1>
-          <p className="sub">Ties are settled by total match completion time.</p>
+          {activeChannel && <button className="link channel-back" onClick={() => { setActiveChannel(null); setBoard(null) }}>‹ All channels</button>}
+          <h1>{activeChannel ? `${board?.channel?.title || channels?.find((c) => c.id === activeChannel)?.title || 'Channel'} Leaderboard` : 'Your leaderboards'}</h1>
+          <p className="sub">{activeChannel ? 'Ties are settled by total match completion time.' : 'Choose a channel to see its daily standings.'}</p>
         </div>
-
-        {left && (
+        {activeChannel && left && (
           <div className="reset-countdown-pill">
             <Clock size={13} />
             <span>Resets in <b>{left}</b></span>
@@ -81,8 +95,30 @@ export default function Leaderboard({ myId }: { myId: number }) {
 
       {err && <div className="notice err">{err}</div>}
 
+      {!activeChannel && channels === null && <div className="empty"><div className="spinner-ring sm" />Loading your channel leagues…</div>}
+      {!activeChannel && channels?.length === 0 && (
+        <div className="empty empty-state-box">
+          <Trophy size={30} className="muted" />
+          <p>No channel leaderboard yet</p>
+          <span className="small muted">Play a quiz from a channel and your league will appear here.</span>
+        </div>
+      )}
+      {!activeChannel && channels?.map((channel) => (
+        <button className="channel-leaderboard-row card" key={channel.id} onClick={() => { setErr(''); setActiveChannel(channel.id) }}>
+          <ChannelMark channel={channel} />
+          <span className="grow">
+            <b>{channel.title}</b>
+            <small>{channel.rank ? `Your rank #${channel.rank} · ${channel.players} players` : `${channel.players} players today`}</small>
+          </span>
+          <span className="channel-board-points"><b>{channel.points ?? 0}</b><small>pts</small></span>
+          <ChevronRight size={19} className="muted" />
+        </button>
+      ))}
+
+      {activeChannel && !board && !err && <div className="empty"><div className="spinner-ring sm" />Loading standings…</div>}
+
       {/* Top 3 Podium (shown when at least 2 players are on the board) */}
-      {top3.length >= 2 && (
+      {activeChannel && top3.length >= 2 && (
         <div className="podium-card card">
           <div className="podium-header">
             <Crown size={15} className="podium-crown-icon" />
@@ -133,7 +169,7 @@ export default function Leaderboard({ myId }: { myId: number }) {
       )}
 
       {/* Empty State */}
-      {board && board.rows.length === 0 && (
+      {activeChannel && board && board.rows.length === 0 && (
         <div className="empty empty-state-box">
           <Trophy size={32} className="muted" style={{ marginBottom: 10 }} />
           <p>Nobody has played yet today.</p>
@@ -142,7 +178,7 @@ export default function Leaderboard({ myId }: { myId: number }) {
       )}
 
       {/* Players List */}
-      <div className="lb-list">
+      {activeChannel && <div className="lb-list">
         {board?.rows.map((r) => {
           const isMe = r.user_id === myId
           const isTop3 = r.rank <= 3
@@ -175,7 +211,8 @@ export default function Leaderboard({ myId }: { myId: number }) {
             </div>
           )
         })}
-      </div>
+      </div>}
+      <div className="channel-powered">Powered By Footy Quiz</div>
     </div>
   )
 }

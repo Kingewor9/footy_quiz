@@ -1,5 +1,5 @@
 import { initData } from './telegram'
-import type { AdminQuiz, Analytics, Board, CreateOutcome, Me, QuizPayload, QuizResult, QuizSummary, StartedQuiz, WinnerCardData, WinnerCardDay } from './types'
+import type { AdminQuiz, Analytics, Board, Channel, CreateOutcome, Me, QuizPayload, QuizResult, QuizSummary, StartedQuiz, WinnerCardData, WinnerCardDay } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -41,16 +41,26 @@ export const api = {
   result: (id: string) => req<QuizResult>(`/quizzes/${id}/result`),
   boost: (id: string) => post<QuizResult>(`/quizzes/${id}/boost`),
   leaderboard: () => req<Board>('/leaderboard'),
+  channels: () => req<Channel[]>('/channels'),
+  channelLeaderboard: (id: string) => req<Board>(`/channels/${encodeURIComponent(id)}/leaderboard`),
+  connectableChannel: (username: string) => req<Pick<Channel, 'id' | 'title' | 'username'> & { bot_username?: string }>(`/admin/channels/lookup?username=${encodeURIComponent(username)}`),
   admin: {
-    quizzes: () => req<AdminQuiz[]>('/admin/quizzes'),
+    channels: () => req<Channel[]>('/admin/channels'),
+    connectChannel: (username: string) => post<Pick<Channel, 'id' | 'title' | 'username'> & { already_connected: boolean; migrated_quizzes?: number }>('/admin/channels', { username }),
+    quizzes: (channelId?: string) => req<AdminQuiz[]>(`/admin/quizzes${channelId ? `?channel_id=${encodeURIComponent(channelId)}` : ''}`),
     create: (body: QuizPayload) => post<CreateOutcome>('/admin/quizzes', body),
     publish: (id: string) => post<CreateOutcome>(`/admin/quizzes/${id}/publish`),
     cancel: (id: string) => req<{ ok: boolean }>(`/admin/quizzes/${id}`, { method: 'DELETE' }),
     analytics: () => req<Analytics>('/admin/analytics'),
-    winnerDays: () => req<WinnerCardDay[]>('/admin/winner-card/days'),
-    winnerCard: (day?: string) => req<WinnerCardData>(`/admin/winner-card${day ? `?day=${day}` : ''}`),
-    saveWinnerDraft: (day: string, caption?: string) => post<{ ok: boolean; day: string; status: string }>('/admin/winner-card/save-draft', { day, caption }),
-    postWinnerCard: (day: string, caption?: string) => post<{ ok: boolean; day: string; status: string; sent_at?: string }>('/admin/winner-card/post', { day, caption }),
+    winnerDays: (channelId?: string) => req<WinnerCardDay[]>(`/admin/winner-card/days${channelId ? `?channel_id=${encodeURIComponent(channelId)}` : ''}`),
+    winnerCard: (day?: string, channelId?: string) => {
+      const params = new URLSearchParams()
+      if (day) params.set('day', day)
+      if (channelId) params.set('channel_id', channelId)
+      return req<WinnerCardData>(`/admin/winner-card${params.size ? `?${params}` : ''}`)
+    },
+    saveWinnerDraft: (day: string, caption?: string, channelId?: string) => post<{ ok: boolean; day: string; status: string }>('/admin/winner-card/save-draft', { day, caption, channel_id: channelId }),
+    postWinnerCard: (day: string, caption?: string, channelId?: string) => post<{ ok: boolean; day: string; status: string; sent_at?: string }>('/admin/winner-card/post', { day, caption, channel_id: channelId }),
   },
 }
 

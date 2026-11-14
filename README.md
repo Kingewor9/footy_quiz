@@ -1,7 +1,7 @@
 # Footy Quiz (Telegram mini app)
 
-Admin creates and manually posts quizzes, fans play in the mini app, and a daily leaderboard resets at
-midnight. Admins can review and post winner image cards for concluded days.
+Channel administrators connect public Telegram channels, create and manually post quizzes, and manage
+separate daily leaderboards and winner cards for each channel. Daily standings reset at midnight.
 
 **Stack:** React + TypeScript (Vite) frontend, Python FastAPI backend in `api/`, MongoDB. Frontend and
 backend deploy together to Vercel as one project.
@@ -9,7 +9,7 @@ backend deploy together to Vercel as one project.
 ```
 api/index.py        Vercel entrypoint (FastAPI app)
 api/_lib/           routes, auth, grading, leaderboard, Telegram helpers, winner card (Pillow)
-src/                React app: Home, Leaderboard, Play, Admin (Send quiz + Analytics)
+src/                React app: Home, channel leagues, Play, Channels, Admin analytics
 tests/              backend tests (pytest, in-memory Mongo)
 ```
 
@@ -22,23 +22,32 @@ tests/              backend tests (pytest, in-memory Mongo)
 - **Score** = sum of points for correct answers. The admin sets each quiz's time limit (1–3600 seconds,
   default 60); players see a countdown and their answers submit when it expires. **Total time** is measured
   by the server in whole seconds and only breaks ties.
-- **Several quizzes a day** add up on that day's leaderboard. The day runs 00:00-23:59 in `APP_TZ`.
+- **Several quizzes a day** add up on that channel's leaderboard. The day runs 00:00-23:59 in `APP_TZ`;
+  the home page also totals points across all channel quizzes for the day.
 - Leaderboard arrows show how many places the most recent quiz moved a player (green up, red down, dash = no
   change or first quiz of the day).
 - Quizzes posted today stay playable until the next leaderboard reset at midnight in `APP_TZ`, then close.
   Their one-play limit does not reset: a closed quiz cannot be replayed the next day.
-- **Draft quizzes:** save quizzes as drafts and post them manually from the Admin page when ready.
-- **Winner cards:** after a leaderboard day concludes, open **Admin → Winner Card** to review its top three,
-  preview the 1080x1080 winner image, edit the caption, save it as a draft, or post it to the channel.
+- **Channel setup:** find a public channel by username, add the bot as an administrator with permission to
+  post messages, then verify the connection. Each connecting Telegram user must also be a channel admin.
+  Connecting the channel configured by the legacy `CHANNEL_ID` setting attaches its existing quizzes,
+  attempts and saved winner cards to that channel league.
+- **Draft quizzes:** save quizzes as drafts and post them manually from **Channels → your channel → Quizzes**.
+- **Winner cards:** after a leaderboard day concludes, open **Channels → your channel → Winner card** to
+  review its top three, preview the 1080x1080 winner image, edit the caption, save it as a draft, or post it.
   Leaderboard attempts remain stored by day, so previous standings are available after the daily reset.
+- Quiz and winner-card Telegram posts include a **Powered By Footy Quiz** watermark. Platform-wide analytics,
+  including connected channel counts, remain restricted to `ADMIN_IDS`.
 
 ## 1. Telegram setup
 
 1. Create a bot in @BotFather, copy the token (`BOT_TOKEN`).
-2. Add the bot as an **admin of your channel** (permission to post).
+2. Add the bot as an **admin of each channel** that will use the game (permission to post messages).
 3. In BotFather: `/newapp`, pick the bot, set the Web App URL to your Vercel URL and choose a short name
    (for example `play`). Your direct link is `https://t.me/<bot_username>/<short_name>` and goes in `MINI_APP_LINK`.
-4. Get your own numeric Telegram id (for example from @userinfobot) and put it in `ADMIN_IDS`.
+4. Get the game owner's numeric Telegram id (for example from @userinfobot) and put it in `ADMIN_IDS`.
+   Channel admins connect their channels from the app's **Channels** page; only `ADMIN_IDS` can view
+   platform-wide analytics.
 
 ## 2. Deploy to Vercel
 
@@ -78,6 +87,7 @@ python -m pytest -q tests       # backend tests
 
 ## Good to know
 
-- Admin routes are protected on the server using Telegram's signed login data, not just hidden in the UI.
+- Channel management routes are protected by Telegram's signed login data and the connected channel record.
+  Connection fails unless Telegram confirms both the user's admin role and the bot's post permission.
 - The winner card font (Poppins, OFL licence) covers Latin letters; emoji and other scripts in a name are dropped from the card.
 - If a channel post fails when you publish a quiz, it still goes live in the app and the Admin page shows the reason.

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+from fastapi.responses import Response
 from pymongo.errors import DuplicateKeyError
 
 from . import config, jobs, telegram
@@ -12,7 +13,7 @@ from .auth import admin_user, current_user
 from .db import db
 from .grading import grade, public_question
 from .leaderboard import board_for_day, day_key, next_reset, now
-from .models import QuizIn, SubmitIn, WinnerCardActionIn
+from .models import ChannelIn, QuizIn, SubmitIn, WinnerCardActionIn
 from .winner_card import build_card, fmt_time
 
 app = FastAPI(title="Footy Quiz API")
@@ -54,7 +55,8 @@ def get_live_quiz(d, qid: str) -> dict:
 
 
 def result_payload(d, quiz: dict, attempt: dict) -> dict:
-    rows = board_for_day(d, attempt["day_key"])
+    channel_id = quiz.get("channel_id")
+    rows = board_for_day(d, attempt["day_key"], channel_id)
     mine = next((r for r in rows if r["user_id"] == attempt["user_id"]), None)
     return {
         "quiz_id": quiz["_id"],
@@ -86,10 +88,19 @@ def me(user: dict = Depends(current_user)):
     )
     rows = board_for_day(d, day_key(now()))
     mine = next((r for r in rows if r["user_id"] == user["id"]), None)
+    channel_ids = d.attempts.distinct(
+        "channel_id",
+        {"user_id": user["id"], "day_key": day_key(now()), "submitted_at": {"$ne": None}, "channel_id": {"$ne": None}},
+    )
     return {
         "user": snapshot(user),
         "is_admin": user["is_admin"],
-        "today": {"rank": mine["rank"] if mine else None, "points": mine["points"] if mine else 0, "players": len(rows)},
+        "today": {
+            "points": mine["points"] if mine else 0,
+            "channels": len(channel_ids),
+            "rank": mine["rank"] if mine else None,
+            "players": len(rows),
+        },
     }
 
 
@@ -113,6 +124,8 @@ def live_quizzes(user: dict = Depends(current_user)):
                 "posted_at": iso(q["posted_at"]),
                 "played": done,
                 "score": a["points"] if done else None,
+                "channel_id": q.get("channel_id"),
+                "channel_name": (d.channels.find_one({"_id": q.get("channel_id")}) or {}).get("title") if q.get("channel_id") else None,
             }
         )
     return out
@@ -134,6 +147,7 @@ def start_quiz(qid: str, user: dict = Depends(current_user)):
             "started_at": now(),
             "submitted_at": None,
             "day_key": None,
+            "channel_id": quiz.get("channel_id"),
         }
         try:
             d.attempts.insert_one(attempt)
@@ -235,10 +249,215 @@ def leaderboard(day: Optional[str] = Query(None), user: dict = Depends(current_u
     }
 
 
+def channel_admin(d, user: dict, channel_id: str) -> dict:
+    channel = d.channels.find_one({"_id": str(channel_id)})
+    if not channel:
+        raise HTTPException(404, "Connected channel not found.")
+    if channel.get("owner_id") != user["id"] and user["id"] not in channel.get("admin_ids", []):
+        raise HTTPException(403, "You must connect this channel as an administrator before managing it.")
+    return channel
+
+
+@router.get("/channels")
+def member_channels(user: dict = Depends(current_user)):
+    d = db()
+    key = day_key(now())
+    channel_ids = d.attempts.distinct(
+        "channel_id",
+        {"user_id": user["id"], "day_key": key, "submitted_at": {"$ne": None}, "channel_id": {"$ne": None}},
+    )
+    out = []
+    for channel_id in channel_ids:
+        channel = d.channels.find_one({"_id": channel_id})
+        if not channel:
+            continue
+        rows = board_for_day(d, key, channel_id)
+        mine = next((r for r in rows if r["user_id"] == user["id"]), None)
+        out.append({
+            "id": channel_id,
+            "title": channel["title"],
+            "username": channel.get("username"),
+            "logo_url": channel_logo_url(channel),
+            "rank": mine["rank"] if mine else None,
+            "points": mine["points"] if mine else 0,
+            "players": len(rows),
+        })
+    return sorted(out, key=lambda x: (x["title"] or "").casefold())
+
+
+@router.get("/channels/{channel_id}/leaderboard")
+def channel_leaderboard(channel_id: str, day: Optional[str] = Query(None), user: dict = Depends(current_user)):
+    d = db()
+    channel = d.channels.find_one({"_id": str(channel_id)})
+    if not channel:
+        raise HTTPException(404, "Channel not found.")
+    n = now()
+    key = day or day_key(n)
+    rows = board_for_day(d, key, str(channel_id))
+    mine = next((r for r in rows if r["user_id"] == user["id"]), None)
+    return {
+        "day": key,
+        "is_today": key == day_key(n),
+        "resets_at": iso(next_reset(n)),
+        "rows": rows[:100],
+        "me": mine,
+        "players": len(rows),
+        "channel": {
+            "id": str(channel_id),
+            "title": channel["title"],
+            "username": channel.get("username"),
+            "logo_url": channel_logo_url(channel),
+        },
+    }
+
+
+def channel_logo_url(channel: dict) -> Optional[str]:
+    return f"/api/channels/{channel['_id']}/logo" if channel.get("photo_file_id") else None
+
+
+@router.get("/channels/{channel_id}/logo")
+def channel_logo(channel_id: str):
+    channel = db().channels.find_one({"_id": str(channel_id)})
+    if not channel or not channel.get("photo_file_id"):
+        raise HTTPException(404, "Channel logo not available.")
+    try:
+        image = telegram.file_bytes(channel["photo_file_id"])
+    except Exception as e:
+        raise HTTPException(502, f"Could not load the Telegram channel logo: {e}")
+    if not image:
+        raise HTTPException(404, "Channel logo not available.")
+    content, mime = image
+    return Response(content=content, media_type=mime, headers={"Cache-Control": "public, max-age=3600"})
+
+
+@router.get("/admin/channels/lookup")
+def lookup_channel(username: str = Query(..., min_length=2, max_length=64), user: dict = Depends(current_user)):
+    handle = username.strip().removeprefix("@")
+    if not (5 <= len(handle) <= 32) or not handle.isascii() or not handle.replace("_", "").isalnum():
+        raise HTTPException(400, "Enter a public channel username.")
+    try:
+        chat = telegram.get_chat(f"@{handle}")
+    except Exception as e:
+        raise HTTPException(400, f"Telegram could not find that public channel: {e}")
+    if chat.get("type") != "channel":
+        raise HTTPException(400, "That username does not belong to a Telegram channel.")
+    bot = telegram.get_me()
+    return {
+        "id": str(chat["id"]),
+        "title": chat.get("title", handle),
+        "username": chat.get("username", handle),
+        "bot_username": bot.get("username"),
+    }
+
+
+@router.post("/admin/channels")
+def connect_channel(body: ChannelIn, user: dict = Depends(current_user)):
+    d = db()
+    handle = body.username.strip().removeprefix("@")
+    if not (5 <= len(handle) <= 32) or not handle.isascii() or not handle.replace("_", "").isalnum():
+        raise HTTPException(400, "Enter a public channel username.")
+    try:
+        chat = telegram.get_chat(f"@{handle}")
+        verified = telegram.verify_channel_access(str(chat["id"]), user["id"])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Could not verify channel permissions: {e}")
+    channel_id = str(verified["id"])
+    existing = d.channels.find_one({"_id": channel_id})
+    if existing:
+        if existing.get("owner_id") == user["id"] or user["id"] in existing.get("admin_ids", []):
+            migrated_quizzes = migrate_legacy_channel_data(d, existing, verified)
+            return {
+                "id": channel_id,
+                "title": existing["title"],
+                "username": existing.get("username"),
+                "already_connected": True,
+                "migrated_quizzes": migrated_quizzes,
+            }
+        d.channels.update_one({"_id": channel_id}, {"$addToSet": {"admin_ids": user["id"]}})
+        migrated_quizzes = migrate_legacy_channel_data(d, existing, verified)
+        return {
+            "id": channel_id,
+            "title": existing["title"],
+            "username": existing.get("username"),
+            "already_connected": False,
+            "migrated_quizzes": migrated_quizzes,
+        }
+    channel = {
+        "_id": channel_id,
+        "title": verified.get("title", handle),
+        "username": verified.get("username", handle),
+        "photo_file_id": (verified.get("photo") or {}).get("big_file_id"),
+        "owner_id": user["id"],
+        "admin_ids": [user["id"]],
+        "created_at": now(),
+    }
+    d.channels.insert_one(channel)
+    migrated_quizzes = migrate_legacy_channel_data(d, channel, verified)
+    return {
+        "id": channel_id,
+        "title": channel["title"],
+        "username": channel["username"],
+        "already_connected": False,
+        "migrated_quizzes": migrated_quizzes,
+    }
+
+
+def migrate_legacy_channel_data(d, channel: dict, chat: dict) -> int:
+    """Attach the old single-channel records when that configured channel is connected."""
+    legacy_id = config.channel_id()
+    legacy_handle = f"@{chat.get('username', '')}"
+    if not legacy_id or not (
+        legacy_id == str(chat["id"]) or legacy_id.casefold() == legacy_handle.casefold()
+    ):
+        return 0
+    legacy_quizzes = list(d.quizzes.find({"channel_id": None}, {"_id": 1}))
+    quiz_ids = [q["_id"] for q in legacy_quizzes]
+    updated_count = 0
+    if quiz_ids:
+        updated = d.quizzes.update_many(
+            {"_id": {"$in": quiz_ids}, "channel_id": None},
+            {"$set": {"channel_id": channel["_id"]}},
+        )
+        d.attempts.update_many(
+            {"quiz_id": {"$in": quiz_ids}, "channel_id": None},
+            {"$set": {"channel_id": channel["_id"]}},
+        )
+        updated_count = updated.modified_count
+    for winner in d.winners.find({"channel_id": None}):
+        day = winner.get("day", winner.get("_id"))
+        try:
+            if datetime.strptime(day, "%Y-%m-%d").strftime("%Y-%m-%d") != day:
+                continue
+        except (TypeError, ValueError):
+            continue
+        migrated = {**winner, "_id": f"{channel['_id']}:{day}", "channel_id": channel["_id"]}
+        d.winners.update_one(
+            {"_id": migrated["_id"]},
+            {"$setOnInsert": migrated},
+            upsert=True,
+        )
+    return updated_count
+
+
+@router.get("/admin/channels")
+def admin_channels(user: dict = Depends(current_user)):
+    d = db()
+    channels = d.channels.find({"$or": [{"owner_id": user["id"]}, {"admin_ids": user["id"]}]}).sort("title", 1)
+    return [
+        {"id": c["_id"], "title": c["title"], "username": c.get("username"), "logo_url": channel_logo_url(c)}
+        for c in channels
+    ]
+
+
 # ---------------------------------------------------------------- admin
 @router.post("/admin/quizzes")
-def create_quiz(body: QuizIn, user: dict = Depends(admin_user)):
+def create_quiz(body: QuizIn, user: dict = Depends(current_user)):
     d = db()
+    channel = channel_admin(d, user, body.channel_id) if body.channel_id else None
+    if not channel and not user["is_admin"]:
+        raise HTTPException(403, "Connect a channel before creating quizzes.")
     questions = [{**q.model_dump(), "id": uuid.uuid4().hex[:8]} for q in body.questions]
     is_draft = body.status == "draft"
     quiz = {
@@ -247,6 +466,7 @@ def create_quiz(body: QuizIn, user: dict = Depends(admin_user)):
         "questions": questions,
         "max_seconds": body.max_seconds,
         "created_by": user["id"],
+        "channel_id": channel["_id"] if channel else None,
         "created_at": now(),
         "status": "draft" if is_draft else "publishing",
         "posted_at": None,
@@ -262,8 +482,15 @@ def create_quiz(body: QuizIn, user: dict = Depends(admin_user)):
 
 
 @router.post("/admin/quizzes/{qid}/publish")
-def publish_draft_quiz(qid: str, user: dict = Depends(admin_user)):
+def publish_draft_quiz(qid: str, user: dict = Depends(current_user)):
     d = db()
+    existing = d.quizzes.find_one({"_id": qid})
+    if not existing:
+        raise HTTPException(404, "Quiz not found.")
+    if existing.get("channel_id"):
+        channel_admin(d, user, existing["channel_id"])
+    elif not user["is_admin"]:
+        raise HTTPException(403, "Admins only.")
     q = d.quizzes.find_one_and_update(
         {"_id": qid, "status": {"$in": ["draft", "scheduled"]}},
         {"$set": {"status": "publishing", "publishing_started_at": now()}},
@@ -282,10 +509,17 @@ def publish_draft_quiz(qid: str, user: dict = Depends(admin_user)):
 
 
 @router.get("/admin/quizzes")
-def admin_quizzes(user: dict = Depends(admin_user)):
+def admin_quizzes(channel_id: Optional[str] = Query(None), user: dict = Depends(current_user)):
     d = db()
+    if channel_id:
+        channel_admin(d, user, channel_id)
+        query = {"channel_id": str(channel_id), "status": {"$ne": "cancelled"}}
+    else:
+        if not user["is_admin"]:
+            raise HTTPException(403, "Admins only.")
+        query = {"status": {"$ne": "cancelled"}}
     out = []
-    for q in d.quizzes.find({"status": {"$ne": "cancelled"}}).sort("created_at", -1).limit(20):
+    for q in d.quizzes.find(query).sort("created_at", -1).limit(20):
         out.append(
             {
                 "id": q["_id"],
@@ -302,8 +536,16 @@ def admin_quizzes(user: dict = Depends(admin_user)):
 
 
 @router.delete("/admin/quizzes/{qid}")
-def cancel_quiz(qid: str, user: dict = Depends(admin_user)):
-    r = db().quizzes.update_one({"_id": qid, "status": {"$in": ["scheduled", "draft"]}}, {"$set": {"status": "cancelled"}})
+def cancel_quiz(qid: str, user: dict = Depends(current_user)):
+    d = db()
+    quiz = d.quizzes.find_one({"_id": qid})
+    if not quiz:
+        raise HTTPException(404, "Quiz not found.")
+    if quiz.get("channel_id"):
+        channel_admin(d, user, quiz["channel_id"])
+    elif not user["is_admin"]:
+        raise HTTPException(403, "Admins only.")
+    r = d.quizzes.update_one({"_id": qid, "status": {"$in": ["scheduled", "draft"]}}, {"$set": {"status": "cancelled"}})
     if not r.modified_count:
         raise HTTPException(400, "Only draft or scheduled quizzes can be cancelled.")
     return {"ok": True}
@@ -345,6 +587,7 @@ def analytics(user: dict = Depends(admin_user)):
         "players_today": next(x["players"] for x in daily if x["day"] == today),
         "plays_today": next(x["plays"] for x in daily if x["day"] == today),
         "quizzes_live": d.quizzes.count_documents({"status": "live"}),
+        "channels_connected": d.channels.count_documents({}),
         "daily": daily,
         "quizzes": quizzes,
     }
@@ -369,13 +612,31 @@ def make_winner_caption(w: dict, rows: list, label: str) -> str:
     return (
         f"Quiz champion for {label}\n\n"
         f"{w['name']} won with {w['points']} points in {fmt_time(w['time_ms'])}.{runners}\n\n"
-        f"A fresh leaderboard is open now. Come and take the top spot."
+        f"A fresh leaderboard is open now. Come and take the top spot.\n\n"
+        f"Powered By Footy Quiz"
     )
 
 
+def add_notification_watermark(caption: str) -> str:
+    caption = caption.rstrip()
+    if caption.casefold().endswith("powered by footy quiz"):
+        return caption
+    return f"{caption}\n\nPowered By Footy Quiz"
+
+
+def winner_scope(d, user: dict, channel_id: Optional[str]):
+    if channel_id:
+        channel = channel_admin(d, user, channel_id)
+        return channel, f"{channel_id}:"
+    if not user["is_admin"]:
+        raise HTTPException(403, "Admins only.")
+    return None, ""
+
+
 @router.get("/admin/winner-card/days")
-def admin_winner_days(user: dict = Depends(admin_user)):
+def admin_winner_days(channel_id: Optional[str] = Query(None), user: dict = Depends(current_user)):
     d = db()
+    channel, prefix = winner_scope(d, user, channel_id)
     n = now()
     days = []
     # Concluded days: 1 to 7 days back
@@ -383,8 +644,12 @@ def admin_winner_days(user: dict = Depends(admin_user)):
         dt = n - timedelta(days=back)
         k = day_key(dt)
         lbl = dt.astimezone(config.app_tz()).strftime("%A, %d %b %Y")
-        rec = d.winners.find_one({"_id": k})
-        count = d.attempts.count_documents({"day_key": k, "submitted_at": {"$ne": None}})
+        record_id = f"{prefix}{k}"
+        rec = d.winners.find_one({"_id": record_id})
+        query = {"day_key": k, "submitted_at": {"$ne": None}}
+        if channel:
+            query["channel_id"] = channel["_id"]
+        count = d.attempts.count_documents(query)
         status = rec.get("status") if rec and rec.get("status") in ("sent", "draft") else ("unsent" if count > 0 else "no_plays")
         days.append({
             "day": k,
@@ -397,13 +662,15 @@ def admin_winner_days(user: dict = Depends(admin_user)):
 
 
 @router.get("/admin/winner-card")
-def admin_winner_card(day: Optional[str] = Query(None), user: dict = Depends(admin_user)):
+def admin_winner_card(day: Optional[str] = Query(None), channel_id: Optional[str] = Query(None), user: dict = Depends(current_user)):
     d = db()
+    channel, prefix = winner_scope(d, user, channel_id)
     target_day = day or day_key(now() - timedelta(days=1))
     label = concluded_day_label(target_day)
 
-    rows = board_for_day(d, target_day)
-    existing = d.winners.find_one({"_id": target_day})
+    rows = board_for_day(d, target_day, channel["_id"] if channel else None)
+    record_id = f"{prefix}{target_day}"
+    existing = d.winners.find_one({"_id": record_id})
     status = existing.get("status") if existing else "ready"
     if status not in ("draft", "sent"):
         status = "ready"
@@ -433,11 +700,13 @@ def admin_winner_card(day: Optional[str] = Query(None), user: dict = Depends(adm
 
     # Generate the winner card PNG and base64 preview
     photo = telegram.profile_photo(w["user_id"], w.get("photo_url"))
-    png = build_card(w["name"], w["points"], w["time_ms"], label, photo, config.env("CHANNEL_HANDLE"))
+    card_channel = channel.get("username") if channel else config.env("CHANNEL_HANDLE")
+    png = build_card(w["name"], w["points"], w["time_ms"], label, photo, card_channel)
     b64_img = f"data:image/png;base64,{base64.b64encode(png).decode('ascii')}"
 
     return {
         "day": target_day,
+        "channel_name": channel["title"] if channel else None,
         "day_label": label,
         "has_data": True,
         "players": len(rows),
@@ -452,21 +721,24 @@ def admin_winner_card(day: Optional[str] = Query(None), user: dict = Depends(adm
 
 
 @router.post("/admin/winner-card/save-draft")
-def admin_save_winner_draft(body: WinnerCardActionIn, user: dict = Depends(admin_user)):
+def admin_save_winner_draft(body: WinnerCardActionIn, user: dict = Depends(current_user)):
     d = db()
+    channel, prefix = winner_scope(d, user, body.channel_id)
     label = concluded_day_label(body.day)
-    rows = board_for_day(d, body.day)
+    rows = board_for_day(d, body.day, channel["_id"] if channel else None)
     if not rows:
         raise HTTPException(400, f"No attempts recorded for {body.day}.")
-    existing = d.winners.find_one({"_id": body.day})
+    record_id = f"{prefix}{body.day}"
+    existing = d.winners.find_one({"_id": record_id})
     if existing and existing.get("status") in ("sent", "posting"):
         raise HTTPException(409, "This winner announcement has already been posted or is being posted.")
-    caption = body.caption.strip() if body.caption else make_winner_caption(rows[0], rows, label)
+    caption = add_notification_watermark(body.caption.strip() if body.caption else make_winner_caption(rows[0], rows, label))
     d.winners.update_one(
-        {"_id": body.day},
+        {"_id": record_id},
         {
             "$set": {
                 "day": body.day,
+                "channel_id": channel["_id"] if channel else None,
                 "status": "draft",
                 "caption": caption,
                 "winner_id": rows[0]["user_id"],
@@ -480,47 +752,54 @@ def admin_save_winner_draft(body: WinnerCardActionIn, user: dict = Depends(admin
 
 
 @router.post("/admin/winner-card/post")
-def admin_post_winner_card(body: WinnerCardActionIn, user: dict = Depends(admin_user)):
+def admin_post_winner_card(body: WinnerCardActionIn, user: dict = Depends(current_user)):
     d = db()
+    channel, prefix = winner_scope(d, user, body.channel_id)
     label = concluded_day_label(body.day)
-    rows = board_for_day(d, body.day)
+    rows = board_for_day(d, body.day, channel["_id"] if channel else None)
     if not rows:
         raise HTTPException(400, f"No attempts recorded for {body.day}.")
-    if not telegram.configured():
+    if (channel and not config.bot_token()) or (not channel and not telegram.configured()):
         raise HTTPException(400, "Telegram bot is not configured (check BOT_TOKEN and CHANNEL_ID).")
 
     w = rows[0]
-    caption = body.caption.strip() if body.caption else make_winner_caption(w, rows, label)
+    caption = add_notification_watermark(body.caption.strip() if body.caption else make_winner_caption(w, rows, label))
     photo = telegram.profile_photo(w["user_id"], w.get("photo_url"))
-    png = build_card(w["name"], w["points"], w["time_ms"], label, photo, config.env("CHANNEL_HANDLE"))
+    card_channel = channel.get("username") if channel else config.env("CHANNEL_HANDLE")
+    png = build_card(w["name"], w["points"], w["time_ms"], label, photo, card_channel)
+    record_id = f"{prefix}{body.day}"
 
     d.winners.update_one(
-        {"_id": body.day},
-        {"$setOnInsert": {"day": body.day, "status": "draft", "created_at": now()}},
+        {"_id": record_id},
+        {"$setOnInsert": {"day": body.day, "channel_id": channel["_id"] if channel else None, "status": "draft", "created_at": now()}},
         upsert=True,
     )
     claim = d.winners.update_one(
-        {"_id": body.day, "status": {"$nin": ["sent", "posting"]}},
+        {"_id": record_id, "status": {"$nin": ["sent", "posting"]}},
         {"$set": {"status": "posting", "caption": caption, "winner_id": w["user_id"], "updated_at": now()}},
     )
     if not claim.modified_count:
         raise HTTPException(409, "This winner announcement has already been posted or is being posted.")
 
     try:
-        telegram.send_photo(png, caption, "Play today's quiz", config.mini_app_link() or "https://t.me")
+        if channel:
+            telegram.send_photo(png, caption, "Play today's quiz", config.mini_app_link() or "https://t.me", chat_id=channel["_id"])
+        else:
+            telegram.send_photo(png, caption, "Play today's quiz", config.mini_app_link() or "https://t.me")
     except Exception as e:
         d.winners.update_one(
-            {"_id": body.day, "status": "posting"},
+            {"_id": record_id, "status": "posting"},
             {"$set": {"status": "draft", "last_error": str(e)}},
         )
         raise HTTPException(502, f"Failed posting to Telegram: {e}")
 
     sent_time = now()
     d.winners.update_one(
-        {"_id": body.day},
+        {"_id": record_id},
         {
             "$set": {
                 "day": body.day,
+                "channel_id": channel["_id"] if channel else None,
                 "status": "sent",
                 "caption": caption,
                 "winner_id": w["user_id"],

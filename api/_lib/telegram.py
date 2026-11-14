@@ -20,6 +20,50 @@ def configured() -> bool:
     return bool(config.bot_token() and config.channel_id())
 
 
+def get_chat(chat: str) -> dict:
+    return _check(httpx.get(_url("getChat"), params={"chat_id": chat}, timeout=TIMEOUT))
+
+
+def get_me() -> dict:
+    return _check(httpx.get(_url("getMe"), timeout=TIMEOUT))
+
+
+def get_chat_member(chat_id: str, user_id: int) -> dict:
+    return _check(httpx.get(
+        _url("getChatMember"),
+        params={"chat_id": chat_id, "user_id": user_id},
+        timeout=TIMEOUT,
+    ))
+
+
+def file_bytes(file_id: str) -> Optional[tuple[bytes, str]]:
+    file_info = _check(httpx.get(_url("getFile"), params={"file_id": file_id}, timeout=TIMEOUT))
+    response = httpx.get(
+        f"https://api.telegram.org/file/bot{config.bot_token()}/{file_info['file_path']}",
+        timeout=TIMEOUT,
+    )
+    response.raise_for_status()
+    valid, mime = is_image_bytes(response.content)
+    return (response.content, mime) if valid else None
+
+
+def verify_channel_access(chat_id: str, user_id: int) -> dict:
+    """Confirm the user administers this channel and the bot can publish to it."""
+    chat = get_chat(chat_id)
+    if chat.get("type") != "channel":
+        raise ValueError("That username does not belong to a Telegram channel.")
+    bot = get_me()
+    bot_member = get_chat_member(chat_id, int(bot["id"]))
+    if bot_member.get("status") not in ("administrator", "creator") or (
+        bot_member.get("status") == "administrator" and not bot_member.get("can_post_messages", False)
+    ):
+        raise ValueError("Make the bot an administrator with permission to post messages, then try again.")
+    user_member = get_chat_member(chat_id, user_id)
+    if user_member.get("status") not in ("administrator", "creator"):
+        raise ValueError("You must be an administrator of this channel to connect it.")
+    return chat
+
+
 def quiz_link(quiz_id: str) -> str:
     return f"{config.mini_app_link()}?startapp={quiz_id}"
 
@@ -106,9 +150,9 @@ def fetch_image_bytes(url: str) -> Optional[tuple[bytes, str]]:
         return None
 
 
-def send_message(text: str, button_text: str, url: str, parse_mode: str = "HTML") -> dict:
+def send_message(text: str, button_text: str, url: str, parse_mode: str = "HTML", chat_id: Optional[str] = None) -> dict:
     payload = {
-        "chat_id": config.channel_id(),
+        "chat_id": chat_id or config.channel_id(),
         "text": text,
         "parse_mode": parse_mode,
         "reply_markup": {"inline_keyboard": [[{"text": button_text, "url": url}]]},
@@ -116,9 +160,9 @@ def send_message(text: str, button_text: str, url: str, parse_mode: str = "HTML"
     return _check(httpx.post(_url("sendMessage"), json=payload, timeout=TIMEOUT))
 
 
-def send_photo_url(photo_url: str, caption: str, button_text: str, url: str, parse_mode: str = "HTML") -> dict:
+def send_photo_url(photo_url: str, caption: str, button_text: str, url: str, parse_mode: str = "HTML", chat_id: Optional[str] = None) -> dict:
     payload = {
-        "chat_id": config.channel_id(),
+        "chat_id": chat_id or config.channel_id(),
         "photo": photo_url,
         "caption": caption,
         "parse_mode": parse_mode,
@@ -127,9 +171,9 @@ def send_photo_url(photo_url: str, caption: str, button_text: str, url: str, par
     return _check(httpx.post(_url("sendPhoto"), json=payload, timeout=TIMEOUT))
 
 
-def send_photo(png: bytes, caption: str, button_text: str, url: str, parse_mode: str = "HTML") -> dict:
+def send_photo(png: bytes, caption: str, button_text: str, url: str, parse_mode: str = "HTML", chat_id: Optional[str] = None) -> dict:
     data = {
-        "chat_id": config.channel_id(),
+        "chat_id": chat_id or config.channel_id(),
         "caption": caption,
         "parse_mode": parse_mode,
         "reply_markup": json.dumps({"inline_keyboard": [[{"text": button_text, "url": url}]]}),
@@ -138,7 +182,7 @@ def send_photo(png: bytes, caption: str, button_text: str, url: str, parse_mode:
     return _check(httpx.post(_url("sendPhoto"), data=data, files=files, timeout=30))
 
 
-def send_quiz_notification(caption: str, button_text: str, url: str, image_url: Optional[str] = None) -> dict:
+def send_quiz_notification(caption: str, button_text: str, url: str, image_url: Optional[str] = None, chat_id: Optional[str] = None) -> dict:
     img = (image_url or config.quiz_notification_image_url()).strip()
     if img:
         # 1. Try downloading real image bytes (handles ibb.co viewer pages and direct URLs)
@@ -148,7 +192,7 @@ def send_quiz_notification(caption: str, button_text: str, url: str, image_url: 
             ext = "jpg" if "jpeg" in mime else mime.split("/")[-1]
             try:
                 data = {
-                    "chat_id": config.channel_id(),
+                    "chat_id": chat_id or config.channel_id(),
                     "caption": caption,
                     "parse_mode": "HTML",
                     "reply_markup": json.dumps({"inline_keyboard": [[{"text": button_text, "url": url}]]}),
@@ -160,12 +204,12 @@ def send_quiz_notification(caption: str, button_text: str, url: str, image_url: 
 
         # 2. Try passing image URL directly to Telegram
         try:
-            return send_photo_url(img, caption, button_text, url, parse_mode="HTML")
+            return send_photo_url(img, caption, button_text, url, parse_mode="HTML", chat_id=chat_id)
         except Exception as e:
             logger.warning("Telegram sendPhoto with URL failed: %s", e)
 
     # 3. Fallback to rich text message
-    return send_message(caption, button_text, url, parse_mode="HTML")
+    return send_message(caption, button_text, url, parse_mode="HTML", chat_id=chat_id)
 
 
 def download(url: str) -> Optional[bytes]:

@@ -11,8 +11,9 @@ import {
   Zap
 } from 'lucide-react'
 import Avatar from '../components/Avatar'
+import ChannelMark from '../components/ChannelMark'
 import { api } from '../api'
-import type { Me, QuizSummary } from '../types'
+import type { Channel, Me, QuizSummary } from '../types'
 
 export default function Home({
   me,
@@ -21,13 +22,15 @@ export default function Home({
 }: {
   me: Me
   onPlay: (id: string) => void
-  onLeaderboard: () => void
+  onLeaderboard: (channelId?: string) => void
 }) {
   const [quizzes, setQuizzes] = useState<QuizSummary[] | null>(null)
+  const [channels, setChannels] = useState<Channel[] | null>(null)
   const [err, setErr] = useState('')
 
   useEffect(() => {
     api.quizzes().then(setQuizzes).catch((e) => setErr(e.message))
+    api.channels().then(setChannels).catch((e) => setErr(e.message))
   }, [])
 
   const first = me.user.name.split(' ')[0]
@@ -59,7 +62,7 @@ export default function Home({
             <Trophy size={17} className="accent-icon" />
             <b>Today's Record</b>
           </div>
-          <button className="link standing-link-btn" onClick={onLeaderboard}>
+          <button className="link standing-link-btn" onClick={() => onLeaderboard()}>
             <span>Leaderboard</span>
             <ChevronRight size={15} />
           </button>
@@ -77,15 +80,35 @@ export default function Home({
           <div className="stat home-stat-box">
             <div className="stat-meta">
               <Trophy size={15} className="stat-icon-trophy" />
-              <span>Current Rank</span>
+              <span>Channel leagues</span>
             </div>
-            <b>{me.today.rank ? `#${me.today.rank}` : '–'}</b>
+            <b>{me.today.channels}</b>
             <span className="stat-subtext">
-              {me.today.rank ? `of ${me.today.players} players` : 'play a quiz to rank'}
+              {me.today.channels === 1 ? 'leaderboard today' : 'leaderboards today'}
             </span>
           </div>
         </div>
       </div>
+
+      <div className="home-leagues-heading">
+        <div><h2>Your channel leagues</h2><p className="small muted">Today’s points and standings are separate for every channel.</p></div>
+        <button className="link" onClick={() => onLeaderboard()}>All <ChevronRight size={15} /></button>
+      </div>
+      {channels === null ? (
+        <div className="card home-leagues-empty"><div className="spinner-ring sm" /><span className="small muted">Loading your channel leagues…</span></div>
+      ) : channels.length === 0 ? (
+        <div className="card home-leagues-empty">
+          <Trophy size={18} className="muted" />
+          <span className="small muted">Play a channel quiz to join its daily leaderboard.</span>
+        </div>
+      ) : channels.map((channel) => (
+        <button className="home-league-row card" key={channel.id} onClick={() => onLeaderboard(channel.id)}>
+          <ChannelMark channel={channel} />
+          <span className="grow home-league-name"><b>{channel.title}</b><small>{channel.rank ? `Rank #${channel.rank} of ${channel.players}` : 'Not ranked today'}</small></span>
+          <b className="home-league-score">{channel.points} <small>pts</small></b>
+          <ChevronRight size={17} className="muted" />
+        </button>
+      ))}
 
       {/* Live Quizzes Section */}
       <div className="section-header-row">
@@ -125,6 +148,9 @@ export default function Home({
               <span className="fixture-meta-tag">
                 Closes at daily reset
               </span>
+              {q.channel_name && (
+                <span className="fixture-meta-tag channel-quiz-tag">{q.channel_name}</span>
+              )}
               <span className="fixture-meta-tag gold">
                 <Award size={12} />
                 Up to {q.total_points} pts

@@ -19,6 +19,7 @@ export default function Analytics() {
         <div className="stat"><b>{a.players_today}</b><span>players today</span></div>
         <div className="stat"><b>{a.plays_today}</b><span>quiz plays today</span></div>
         <div className="stat"><b>{a.quizzes_live}</b><span>quizzes sent</span></div>
+        <div className="stat"><b>{a.channels_connected}</b><span>channels connected</span></div>
       </div>
 
       <div className="card">

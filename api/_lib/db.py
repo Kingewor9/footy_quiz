@@ -21,6 +21,10 @@ def db():
     if not _indexed:
         d.attempts.create_index([("quiz_id", 1), ("user_id", 1)], unique=True)
         d.attempts.create_index("day_key")
+        d.attempts.create_index([("channel_id", 1), ("day_key", 1)])
         d.quizzes.create_index([("status", 1), ("posted_at", -1)])
+        d.quizzes.create_index([("channel_id", 1), ("status", 1)])
+        d.channels.create_index("owner_id")
+        d.channels.create_index("admin_ids")
         _indexed = True
     return d

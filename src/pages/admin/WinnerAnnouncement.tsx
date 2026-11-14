@@ -3,7 +3,7 @@ import { CheckCircle2, FileEdit, Send, Trophy } from 'lucide-react'
 import { api, fmtTime } from '../../api'
 import type { WinnerCardData, WinnerCardDay } from '../../types'
 
-export default function WinnerAnnouncement() {
+export default function WinnerAnnouncement({ channelId }: { channelId?: string }) {
   const [days, setDays] = useState<WinnerCardDay[]>([])
   const [selectedDay, setSelectedDay] = useState<string>('')
   const [data, setData] = useState<WinnerCardData | null>(null)
@@ -14,7 +14,7 @@ export default function WinnerAnnouncement() {
 
   const loadDays = useCallback(async () => {
     try {
-      const list = await api.admin.winnerDays()
+      const list = await api.admin.winnerDays(channelId)
       setDays(list)
       if (list.length > 0 && !selectedDay) {
         setSelectedDay(list[0].day)
@@ -22,7 +22,7 @@ export default function WinnerAnnouncement() {
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message })
     }
-  }, [selectedDay])
+  }, [selectedDay, channelId])
 
   useEffect(() => {
     loadDays()
@@ -33,7 +33,7 @@ export default function WinnerAnnouncement() {
     setLoading(true)
     setMsg(null)
     try {
-      const res = await api.admin.winnerCard(dayKey)
+      const res = await api.admin.winnerCard(dayKey, channelId)
       setData(res)
       setCaption(res.caption || '')
     } catch (e) {
@@ -41,7 +41,7 @@ export default function WinnerAnnouncement() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [channelId])
 
   useEffect(() => {
     if (selectedDay) {
@@ -54,7 +54,7 @@ export default function WinnerAnnouncement() {
     setActionBusy('draft')
     setMsg(null)
     try {
-      await api.admin.saveWinnerDraft(selectedDay, caption)
+      await api.admin.saveWinnerDraft(selectedDay, caption, channelId)
       setMsg({ ok: true, text: 'Winner announcement saved as draft.' })
       loadCard(selectedDay)
       loadDays()
@@ -70,7 +70,7 @@ export default function WinnerAnnouncement() {
     setActionBusy('post')
     setMsg(null)
     try {
-      await api.admin.postWinnerCard(selectedDay, caption)
+      await api.admin.postWinnerCard(selectedDay, caption, channelId)
       setMsg({ ok: true, text: 'Winner card and announcement posted to Telegram channel successfully!' })
       loadCard(selectedDay)
       loadDays()
@@ -156,7 +156,7 @@ export default function WinnerAnnouncement() {
           <div className="card stack">
             <div className="row between" style={{ alignItems: 'center' }}>
               <div>
-                <b style={{ fontSize: '1.05rem' }}>{data.day_label}</b>
+                <b style={{ fontSize: '1.05rem' }}>{data.channel_name ? `${data.channel_name} · ` : ''}{data.day_label}</b>
                 <div className="small muted">
                   {data.players} player{data.players !== 1 ? 's' : ''} participated
                 </div>

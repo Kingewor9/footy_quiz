@@ -53,7 +53,7 @@ def test_flow():
 
     lb = c.get("/api/leaderboard", headers=H(3)).json()
     assert [x["user_id"] for x in lb["rows"]] == [2, 3, 4] and lb["me"]["rank"] == 2
-    assert c.get("/api/me", headers=H(3)).json()["today"] == {"rank": 2, "points": 10, "players": 3}
+    assert c.get("/api/me", headers=H(3)).json()["today"] == {"rank": 2, "points": 10, "players": 3, "channels": 0}
 
     # second quiz same day: points accumulate, movement shows
     q2 = c.post("/api/admin/quizzes", json={"title": "Q2", "questions": [QUIZ["questions"][0]]}, headers=H(1)).json()["id"]
@@ -151,6 +151,135 @@ def test_draft_quiz_can_be_manually_published_and_scheduler_routes_are_gone():
 
     assert c.get("/api/cron/tick").status_code == 404
     assert c.post("/api/admin/scheduler/tick", headers=H(1)).status_code == 404
+
+
+def test_channels_require_post_rights_and_keep_standings_separate(monkeypatch):
+    channel_data = {
+        "@leagueone": {"id": -100101, "type": "channel", "title": "League One", "username": "leagueone"},
+        "@leaguetwo": {"id": -100102, "type": "channel", "title": "League Two", "username": "leaguetwo"},
+    }
+
+    def get_chat(chat):
+        return channel_data.get(chat) or next((c for c in channel_data.values() if str(c["id"]) == str(chat)), {})
+
+    monkeypatch.setattr(telegram, "get_chat", get_chat)
+    monkeypatch.setattr(telegram, "get_me", lambda: {"username": "footyquizbot"})
+    monkeypatch.setattr(telegram, "verify_channel_access", lambda chat_id, user_id: get_chat(chat_id))
+    sent = []
+
+    def send_notification(caption, button_text, url, image_url=None, chat_id=None):
+        sent.append({"caption": caption, "chat_id": chat_id})
+        return {"message_id": len(sent)}
+
+    monkeypatch.setattr(telegram, "send_quiz_notification", send_notification)
+    monkeypatch.setenv("MINI_APP_LINK", "https://t.me/bot/app")
+
+    one = c.post("/api/admin/channels", json={"username": "@leagueone"}, headers=H(1))
+    two = c.post("/api/admin/channels", json={"username": "leaguetwo"}, headers=H(990))
+    assert one.status_code == two.status_code == 200
+    lookup = c.get("/api/admin/channels/lookup?username=leagueone", headers=H(1))
+    assert lookup.status_code == 200 and lookup.json()["bot_username"] == "footyquizbot"
+    one_id, two_id = one.json()["id"], two.json()["id"]
+    added_admin = c.post("/api/admin/channels", json={"username": "leagueone"}, headers=H(991))
+    assert added_admin.status_code == 200 and one_id in [channel["id"] for channel in c.get("/api/admin/channels", headers=H(991)).json()]
+
+    q1 = c.post("/api/admin/quizzes", json={**QUIZ, "channel_id": one_id}, headers=H(1)).json()
+    q2 = c.post("/api/admin/quizzes", json={**QUIZ, "channel_id": two_id}, headers=H(990)).json()
+    assert q1["notified"] and q2["notified"]
+    assert sent[0]["chat_id"] == one_id and "Powered By Footy Quiz" in sent[0]["caption"]
+    assert sent[1]["chat_id"] == two_id
+
+    assert play(771, q1["id"], ["1", "Madrid!", "0"]).json()["points"] == 35
+    assert play(772, q1["id"], ["1", "wrong", "1"]).json()["points"] == 10
+    assert play(771, q2["id"], ["1", "Madrid!", "0"]).json()["points"] == 35
+
+    board_one = c.get(f"/api/channels/{one_id}/leaderboard", headers=H(771)).json()
+    board_two = c.get(f"/api/channels/{two_id}/leaderboard", headers=H(771)).json()
+    assert board_one["channel"]["title"] == "League One"
+    assert [r["user_id"] for r in board_one["rows"]] == [771, 772]
+    assert [r["user_id"] for r in board_two["rows"]] == [771]
+    assert len(c.get("/api/channels", headers=H(771)).json()) == 2
+    assert c.get("/api/me", headers=H(771)).json()["today"]["points"] == 70
+    assert c.get("/api/me", headers=H(771)).json()["today"]["channels"] == 2
+    assert c.post("/api/admin/quizzes", json={**QUIZ, "channel_id": one_id}, headers=H(3)).status_code == 403
+
+    from _lib.leaderboard import day_key
+    yesterday = day_key(now() - timedelta(days=1))
+    for channel_id, uid, points in [(one_id, 781, 50), (two_id, 782, 20)]:
+        db().attempts.insert_one({
+            "_id": f"channel-winner-{uid}",
+            "quiz_id": f"old-{channel_id}",
+            "channel_id": channel_id,
+            "user_id": uid,
+            "user": {"id": uid, "name": f"Winner {uid}"},
+            "started_at": now(),
+            "submitted_at": now(),
+            "day_key": yesterday,
+            "points": points,
+            "time_ms": 1000,
+            "results": [],
+        })
+    monkeypatch.setattr(telegram, "profile_photo", lambda uid, url: None)
+    posted_to = {}
+
+    def send_winner(png, caption, button_text, url, parse_mode="HTML", chat_id=None):
+        posted_to.update(chat_id=chat_id, caption=caption)
+
+    monkeypatch.setattr(telegram, "send_photo", send_winner)
+    preview = c.get(f"/api/admin/winner-card?day={yesterday}&channel_id={one_id}", headers=H(1))
+    assert preview.status_code == 200 and preview.json()["channel_name"] == "League One"
+    assert preview.json()["winner"]["user_id"] == 781
+    posted = c.post(
+        "/api/admin/winner-card/post",
+        json={"day": yesterday, "channel_id": one_id, "caption": "League One champion"},
+        headers=H(1),
+    )
+    assert posted.status_code == 200
+    assert posted_to["chat_id"] == one_id and posted_to["caption"].endswith("Powered By Footy Quiz")
+
+
+def test_channel_connection_rejects_bot_without_post_permission(monkeypatch):
+    monkeypatch.setattr(telegram, "get_chat", lambda chat: {"id": -100201, "type": "channel", "title": "No Posts", "username": "noposts"})
+    monkeypatch.setattr(telegram, "get_me", lambda: {"id": 999})
+
+    def member(chat_id, user_id):
+        return {"status": "administrator", "can_post_messages": user_id != 999}
+
+    monkeypatch.setattr(telegram, "get_chat_member", member)
+    response = c.post("/api/admin/channels", json={"username": "noposts"}, headers=H(1))
+    assert response.status_code == 400
+    assert "permission to post" in response.json()["detail"]
+
+
+def test_connecting_the_legacy_channel_migrates_existing_daily_records(monkeypatch):
+    channel = {"id": -100301, "type": "channel", "title": "Legacy League", "username": "legacychannel"}
+    monkeypatch.setenv("CHANNEL_ID", "@legacychannel")
+    monkeypatch.setattr(telegram, "get_chat", lambda chat: channel)
+    monkeypatch.setattr(telegram, "verify_channel_access", lambda chat_id, user_id: channel)
+    d = db()
+    quiz_id = "legacy-channel-migration"
+    d.quizzes.insert_one({"_id": quiz_id, "title": "Old quiz", "questions": [], "status": "live"})
+    day = "2001-02-03"
+    d.attempts.insert_one({
+        "_id": "legacy-channel-attempt",
+        "quiz_id": quiz_id,
+        "user_id": 4501,
+        "user": {"id": 4501, "name": "Legacy player"},
+        "started_at": now(),
+        "submitted_at": now(),
+        "day_key": day,
+        "points": 25,
+        "time_ms": 1000,
+        "results": [],
+    })
+    d.winners.insert_one({"_id": day, "day": day, "status": "draft", "caption": "Legacy winner"})
+
+    response = c.post("/api/admin/channels", json={"username": "legacychannel"}, headers=H(4500))
+    assert response.status_code == 200 and response.json()["migrated_quizzes"] >= 1
+    channel_id = response.json()["id"]
+    assert d.quizzes.find_one({"_id": quiz_id})["channel_id"] == channel_id
+    assert d.attempts.find_one({"_id": "legacy-channel-attempt"})["channel_id"] == channel_id
+    assert d.winners.find_one({"_id": f"{channel_id}:{day}"})["caption"] == "Legacy winner"
 
 
 def test_quiz_notification_with_image_and_catchy_text():
@@ -269,6 +398,7 @@ def test_manual_winner_announcement_draft_and_post():
     posted = c.post("/api/admin/winner-card/post", json={"day": key}, headers=H(1))
     assert posted.status_code == 200 and posted.json()["status"] == "sent"
     assert sent["png"][:8] == b"\x89PNG\r\n\x1a\n" and "Samuel" in sent["cap"]
+    assert "Powered By Footy Quiz" in sent["cap"]
     assert c.post("/api/admin/winner-card/post", json={"day": key}, headers=H(1)).status_code == 409
     assert c.post("/api/admin/winner-card/save-draft", json={"day": key}, headers=H(1)).status_code == 409
 

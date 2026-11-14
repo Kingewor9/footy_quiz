@@ -45,6 +45,7 @@ class QuizIn(BaseModel):
     questions: List[QuestionIn] = Field(min_length=1, max_length=30)
     max_seconds: int = Field(default=60, ge=1, le=3600)
     status: Literal["live", "draft"] = "live"
+    channel_id: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -64,3 +65,8 @@ class SubmitIn(BaseModel):
 class WinnerCardActionIn(BaseModel):
     day: str = Field(min_length=10, max_length=10)
     caption: Optional[str] = None
+    channel_id: Optional[str] = None
+
+
+class ChannelIn(BaseModel):
+    username: str = Field(min_length=2, max_length=64)

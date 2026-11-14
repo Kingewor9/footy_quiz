@@ -1,7 +1,7 @@
-import { Home, Trophy, ShieldCheck } from 'lucide-react'
+import { Home, Trophy, ShieldCheck, RadioTower } from 'lucide-react'
 import { haptic } from '../telegram'
 
-export type Tab = 'home' | 'leaderboard' | 'admin'
+export type Tab = 'home' | 'leaderboard' | 'channels' | 'admin'
 
 interface TabConfig {
   key: Tab
@@ -11,7 +11,8 @@ interface TabConfig {
 
 const TABS: TabConfig[] = [
   { key: 'home', label: 'Home', icon: Home },
-  { key: 'leaderboard', label: 'Leaderboard', icon: Trophy },
+  { key: 'leaderboard', label: 'Leagues', icon: Trophy },
+  { key: 'channels', label: 'Channels', icon: RadioTower },
   { key: 'admin', label: 'Admin', icon: ShieldCheck },
 ]
 

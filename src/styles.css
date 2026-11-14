@@ -619,6 +619,297 @@ textarea.input {
   background: linear-gradient(135deg, var(--card) 0%, var(--soft) 100%);
 }
 
+.home-leagues-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 24px 0 10px;
+}
+
+.home-leagues-heading h2 {
+  margin: 0 0 3px;
+}
+
+.home-leagues-heading p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.home-leagues-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.home-league-row,
+.channel-leaderboard-row,
+.channel-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  gap: 13px;
+}
+
+.home-league-row {
+  padding: 13px 15px;
+  margin-bottom: 9px;
+  border-radius: 20px;
+}
+
+.home-league-name,
+.channel-leaderboard-row > .grow,
+.channel-row-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.home-league-name small,
+.channel-leaderboard-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.home-league-score,
+.channel-board-points {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.home-league-score small,
+.channel-board-points small {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 3px;
+}
+
+.channel-quiz-tag {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.channels-page {
+  padding-top: 30px;
+}
+
+.channels-heading {
+  position: relative;
+  margin-bottom: 21px;
+}
+
+.channels-heading h1 {
+  font-size: 32px;
+  letter-spacing: -0.045em;
+  margin-top: 10px;
+}
+
+.channels-heading .sub {
+  margin-bottom: 0;
+}
+
+.eyebrow {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .14em;
+}
+
+.channel-connect-card {
+  padding: 19px;
+  overflow: hidden;
+}
+
+.channel-connect-card::before {
+  content: "";
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  right: -80px;
+  top: -100px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  opacity: .7;
+  pointer-events: none;
+}
+
+.channel-section-title,
+.channel-admin-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.channel-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.channel-search-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 17px;
+}
+
+.channel-search-row .input {
+  min-width: 0;
+}
+
+.channel-search-button {
+  padding-left: 17px;
+  padding-right: 17px;
+}
+
+.channel-permission-note {
+  margin: 11px 1px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.channel-found-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 15px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--soft);
+}
+
+.channel-monogram {
+  width: 43px;
+  height: 43px;
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--on-accent);
+  background:
+    radial-gradient(circle at 75% 20%, rgba(255,255,255,.28), transparent 35%),
+    linear-gradient(145deg, var(--accent), #243db5);
+  font-size: 17px;
+  font-weight: 850;
+  box-shadow: 0 5px 14px rgba(50, 70, 190, .18);
+}
+
+.channel-mark {
+  position: relative;
+  overflow: hidden;
+}
+
+.channel-mark-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.channels-list-heading {
+  align-items: center;
+  margin-top: 27px;
+}
+
+.channels-list-heading h2 {
+  margin: 0 0 3px;
+}
+
+.channels-list-heading .small {
+  line-height: 1.4;
+  display: block;
+}
+
+.channel-row {
+  padding: 14px;
+  margin-bottom: 10px;
+  border-radius: 20px;
+  transition: transform .18s ease, border-color .18s ease;
+}
+
+.channel-row:hover,
+.channel-leaderboard-row:hover,
+.home-league-row:hover {
+  transform: translateY(-2px);
+  border-color: var(--card-border-hover);
+}
+
+.channel-manage-label {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.channel-leaderboard-row {
+  padding: 15px;
+  border-radius: 20px;
+  margin-bottom: 10px;
+}
+
+.channel-admin-page {
+  padding-top: 22px;
+}
+
+.channel-back {
+  margin: 0 0 13px -5px;
+}
+
+.channel-admin-title {
+  margin-bottom: 17px;
+}
+
+.channel-admin-title h1 {
+  margin: 0 0 3px;
+  font-size: 23px;
+}
+
+.channel-admin-title .sub {
+  margin: 0;
+}
+
+.channel-admin-tabs button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+}
+
+.channel-powered {
+  margin: 27px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 430px) {
+  .nav.floating-navbar {
+    gap: 3px;
+    padding: 7px 8px;
+    max-width: calc(100vw - 20px);
+  }
+
+  .nav-tab-btn {
+    min-width: 72px;
+    padding: 7px 9px;
+  }
+}
+
 .standing-header b {
   font-size: 16px;
   font-weight: 750;

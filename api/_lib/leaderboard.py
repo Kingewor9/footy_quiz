@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import math
+from typing import Optional
 
 from . import config
 
@@ -36,12 +37,15 @@ def standings(attempts: list) -> list:
     return rows
 
 
-def board_for_day(db, key: str) -> list:
+def board_for_day(db, key: str, channel_id: Optional[str] = None) -> list:
     """Standings for a day, with movement caused by the most recently played quiz.
 
     up/down = places gained/lost by the latest quiz, same = unchanged, new = first quiz of the day.
     """
-    atts = list(db.attempts.find({"day_key": key, "submitted_at": {"$ne": None}}))
+    query = {"day_key": key, "submitted_at": {"$ne": None}}
+    if channel_id is not None:
+        query["channel_id"] = channel_id
+    atts = list(db.attempts.find(query))
     rows = standings(atts)
     prev = {}
     if atts and len({a["quiz_id"] for a in atts}) > 1:

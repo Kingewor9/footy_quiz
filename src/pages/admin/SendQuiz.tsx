@@ -93,7 +93,7 @@ function QuestionEditor({ n, d, onChange, onRemove, canRemove }: { n: number; d:
   )
 }
 
-export default function SendQuiz() {
+export default function SendQuiz({ channelId }: { channelId?: string }) {
   const [title, setTitle] = useState('')
   const [maxSeconds, setMaxSeconds] = useState(60)
   const [mode, setMode] = useState<'live' | 'draft'>('live')
@@ -104,8 +104,8 @@ export default function SendQuiz() {
   const [recent, setRecent] = useState<AdminQuiz[]>([])
 
   const loadRecent = useCallback(() => {
-    api.admin.quizzes().then(setRecent).catch(() => undefined)
-  }, [])
+    api.admin.quizzes(channelId).then(setRecent).catch(() => undefined)
+  }, [channelId])
   useEffect(loadRecent, [loadRecent])
 
   const handlePublish = async (id: string) => {
@@ -136,6 +136,7 @@ export default function SendQuiz() {
         title: title.trim(),
         max_seconds: maxSeconds,
         status: mode,
+        channel_id: channelId,
         questions: qs.map(toPayload),
       })
       if (r.status === 'draft') setMsg({ ok: true, text: 'Quiz saved as draft. You can post it anytime below.' })

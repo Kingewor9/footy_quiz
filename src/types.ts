@@ -7,7 +7,7 @@ export interface Player {
 export interface Me {
   user: Player
   is_admin: boolean
-  today: { rank: number | null; points: number; players: number }
+  today: { points: number; channels: number; rank?: number | null; players?: number }
 }
 export interface QuizSummary {
   id: string
@@ -18,6 +18,8 @@ export interface QuizSummary {
   posted_at: string
   played: boolean
   score: number | null
+  channel_id?: string | null
+  channel_name?: string | null
 }
 export interface Question {
   id: string
@@ -75,6 +77,16 @@ export interface Board {
   rows: BoardRow[]
   me: BoardRow | null
   players: number
+  channel?: Channel
+}
+export interface Channel {
+  id: string
+  title: string
+  username?: string | null
+  logo_url?: string | null
+  rank?: number | null
+  points?: number
+  players?: number
 }
 export interface AdminQuiz {
   id: string
@@ -91,6 +103,7 @@ export interface Analytics {
   players_today: number
   plays_today: number
   quizzes_live: number
+  channels_connected: number
   daily: { day: string; players: number; plays: number }[]
   quizzes: { id: string; title: string; started: number; players: number; avg_score_pct: number; avg_time_ms: number; completion_pct: number }[]
 }
@@ -114,6 +127,7 @@ export interface QuizPayload {
   title: string
   max_seconds: number
   status?: 'live' | 'draft'
+  channel_id?: string
   questions: QuestionPayload[]
 }
 
@@ -128,6 +142,7 @@ export interface WinnerCardDay {
 export interface WinnerCardData {
   day: string
   day_label: string
+  channel_name?: string | null
   has_data: boolean
   players: number
   winner: {
