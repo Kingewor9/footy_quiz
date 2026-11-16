@@ -426,7 +426,9 @@ textarea.input {
   transform: translateX(-50%);
   bottom: max(18px, env(safe-area-inset-bottom));
   display: flex;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 4px;
+  width: min(540px, calc(100vw - 20px));
   padding: 8px 12px;
   border-radius: 32px;
   background: var(--glass-dock);
@@ -442,8 +444,9 @@ textarea.input {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  min-width: 86px;
-  padding: 8px 14px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 6px;
   border-radius: 22px;
   font-size: 11px;
   font-weight: 700;
@@ -685,6 +688,132 @@ textarea.input {
   margin-left: 3px;
 }
 
+.discover-section-heading {
+  align-items: center;
+  margin-top: 28px;
+}
+
+.discover-section-heading h2 {
+  margin: 0 0 4px;
+}
+
+.discover-section-heading p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.discover-section-heading > .link {
+  flex: none;
+  white-space: nowrap;
+}
+
+.discover-section-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 5px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .1em;
+}
+
+.discover-channel-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  margin-bottom: 9px;
+  border-radius: 20px;
+  color: var(--text);
+  text-align: left;
+  text-decoration: none;
+}
+
+a.discover-channel-row:hover {
+  transform: translateY(-2px);
+  border-color: var(--card-border-hover);
+}
+
+.discover-channel-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.discover-channel-copy b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discover-channel-copy small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.discover-quiz-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.discover-open-icon {
+  flex: none;
+  color: var(--muted);
+}
+
+.discover-page {
+  padding-top: 30px;
+}
+
+.discover-heading {
+  margin-bottom: 20px;
+}
+
+.discover-heading h1 {
+  margin-top: 10px;
+}
+
+.discover-heading .sub {
+  margin-bottom: 0;
+}
+
+.discover-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 0 15px;
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: var(--card);
+  color: var(--muted);
+  box-shadow: var(--shadow);
+}
+
+.discover-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 14px 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.discover-search input:focus-visible {
+  outline: 0;
+}
+
 .channel-quiz-tag {
   background: var(--accent-soft);
   color: var(--accent);
@@ -899,14 +1028,24 @@ textarea.input {
 
 @media (max-width: 430px) {
   .nav.floating-navbar {
-    gap: 3px;
-    padding: 7px 8px;
-    max-width: calc(100vw - 20px);
+    gap: 2px;
+    padding: 7px 6px;
   }
 
   .nav-tab-btn {
-    min-width: 72px;
-    padding: 7px 9px;
+    padding: 7px 3px;
+    font-size: 10px;
+  }
+
+  .discover-channel-row {
+    gap: 8px;
+    padding: 11px 10px;
+  }
+
+  .discover-quiz-count {
+    gap: 4px;
+    padding: 6px 7px;
+    font-size: 10px;
   }
 }
 

@@ -1,5 +1,5 @@
 import { initData } from './telegram'
-import type { AdminQuiz, Analytics, Board, Channel, CreateOutcome, Me, QuizPayload, QuizResult, QuizSummary, StartedQuiz, WinnerCardData, WinnerCardDay } from './types'
+import type { AdminQuiz, Analytics, Board, Channel, CreateOutcome, DiscoverChannels, Me, QuizPayload, QuizResult, QuizSummary, StartedQuiz, WinnerCardData, WinnerCardDay } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -42,6 +42,7 @@ export const api = {
   boost: (id: string) => post<QuizResult>(`/quizzes/${id}/boost`),
   leaderboard: () => req<Board>('/leaderboard'),
   channels: () => req<Channel[]>('/channels'),
+  discoverChannels: () => req<DiscoverChannels>('/discover/channels'),
   channelLeaderboard: (id: string) => req<Board>(`/channels/${encodeURIComponent(id)}/leaderboard`),
   connectableChannel: (username: string) => req<Pick<Channel, 'id' | 'title' | 'username'> & { bot_username?: string }>(`/admin/channels/lookup?username=${encodeURIComponent(username)}`),
   admin: {

@@ -3,6 +3,7 @@ import { api } from './api'
 import NavBar, { Tab } from './components/NavBar'
 import Admin from './pages/Admin'
 import Channels from './pages/Channels'
+import Discover from './pages/Discover'
 import Home from './pages/Home'
 import Leaderboard from './pages/Leaderboard'
 import Play from './pages/Play'
@@ -41,7 +42,8 @@ export default function App() {
 
   return (
     <>
-      {tab === 'home' && <Home me={me} onPlay={setPlayId} onLeaderboard={(channelId) => { setLeaderboardChannel(channelId ?? null); setTab('leaderboard') }} />}
+      {tab === 'home' && <Home me={me} onPlay={setPlayId} onDiscover={() => setTab('discover')} onLeaderboard={(channelId) => { setLeaderboardChannel(channelId ?? null); setTab('leaderboard') }} />}
+      {tab === 'discover' && <Discover />}
       {tab === 'leaderboard' && <Leaderboard key={leaderboardChannel ?? 'all-leagues'} myId={me.user.id} initialChannelId={leaderboardChannel} />}
       {tab === 'channels' && (selectedChannel
         ? <Admin channelId={selectedChannel.id} channelName={selectedChannel.title} isPlatformAdmin={me.is_admin} onBack={() => setSelectedChannel(null)} />

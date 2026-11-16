@@ -8,10 +8,13 @@ import {
   Play as PlayIcon,
   CheckCircle2,
   ChevronRight,
-  Zap
+  Zap,
+  Compass
 } from 'lucide-react'
 import Avatar from '../components/Avatar'
 import ChannelMark from '../components/ChannelMark'
+import DiscoverChannelCard from '../components/DiscoverChannelCard'
+import useDiscoverChannels from '../hooks/useDiscoverChannels'
 import { api } from '../api'
 import type { Channel, Me, QuizSummary } from '../types'
 
@@ -19,14 +22,17 @@ export default function Home({
   me,
   onPlay,
   onLeaderboard,
+  onDiscover,
 }: {
   me: Me
   onPlay: (id: string) => void
   onLeaderboard: (channelId?: string) => void
+  onDiscover: () => void
 }) {
   const [quizzes, setQuizzes] = useState<QuizSummary[] | null>(null)
   const [channels, setChannels] = useState<Channel[] | null>(null)
   const [err, setErr] = useState('')
+  const { data: discover, error: discoverErr } = useDiscoverChannels()
 
   useEffect(() => {
     api.quizzes().then(setQuizzes).catch((e) => setErr(e.message))
@@ -108,6 +114,28 @@ export default function Home({
           <b className="home-league-score">{channel.points} <small>pts</small></b>
           <ChevronRight size={17} className="muted" />
         </button>
+      ))}
+
+      <div className="home-leagues-heading discover-section-heading">
+        <div>
+          <div className="discover-section-eyebrow"><Compass size={13} /> OPEN TO EVERYONE</div>
+          <h2>Discover channel leagues</h2>
+          <p className="small muted">Fresh quizzes from public channels, posted today.</p>
+        </div>
+        <button className="link" onClick={onDiscover}>Explore all <ChevronRight size={15} /></button>
+      </div>
+      {discoverErr && <div className="notice err">{discoverErr}</div>}
+      {!discover && !discoverErr && (
+        <div className="card home-leagues-empty"><div className="spinner-ring sm" /><span className="small muted">Finding today’s active leagues…</span></div>
+      )}
+      {discover?.channels.length === 0 && (
+        <div className="card home-leagues-empty">
+          <Compass size={18} className="muted" />
+          <span className="small muted">No channels have posted a quiz today. Check back after the next post.</span>
+        </div>
+      )}
+      {discover?.channels.slice(0, 3).map((channel) => (
+        <DiscoverChannelCard channel={channel} key={channel.id} />
       ))}
 
       {/* Live Quizzes Section */}

@@ -88,6 +88,13 @@ export interface Channel {
   points?: number
   players?: number
 }
+export interface DiscoverChannel extends Pick<Channel, 'id' | 'title' | 'username' | 'logo_url'> {
+  quizzes_today: number
+}
+export interface DiscoverChannels {
+  channels: DiscoverChannel[]
+  resets_at: string
+}
 export interface AdminQuiz {
   id: string
   title: string

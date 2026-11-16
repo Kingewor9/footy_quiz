@@ -1,5 +1,5 @@
 import hashlib, hmac, json, os, sys, time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 os.environ.update(MONGODB_URI="mongomock://", DEV_MODE="1", ADMIN_IDS="1", APP_TZ="Africa/Lagos", BOT_TOKEN="123:ABC")
@@ -92,6 +92,39 @@ def test_booster_doubles_score():
 
     # Cannot boost quiz not played
     assert c.post("/api/quizzes/invalid-id/boost", headers=H(50)).status_code == 404
+
+
+def test_discover_channels_only_lists_connected_channels_with_live_quizzes_today(monkeypatch, request):
+    current_time = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
+    monkeypatch.setattr(routes, "now", lambda: current_time)
+    d = db()
+    quiz_ids = [f"discover-{name}" for name in ("alpha-1", "alpha-2", "beta-1", "stale-1", "draft-1", "unsent-1", "unconnected-1")]
+    channel_ids = [f"discover-{name}" for name in ("alpha", "beta", "quiet", "stale", "draft", "unsent")]
+    request.addfinalizer(lambda: d.quizzes.delete_many({"_id": {"$in": quiz_ids}}))
+    request.addfinalizer(lambda: d.channels.delete_many({"_id": {"$in": channel_ids}}))
+    d.channels.insert_many([
+        {"_id": "discover-alpha", "title": "Alpha League", "username": "alphaleague"},
+        {"_id": "discover-beta", "title": "Beta League", "username": "betaleague"},
+        {"_id": "discover-quiet", "title": "Quiet League", "username": "quietleague"},
+        {"_id": "discover-stale", "title": "Yesterday League", "username": "yesterdayleague"},
+        {"_id": "discover-draft", "title": "Draft League", "username": "draftleague"},
+        {"_id": "discover-unsent", "title": "Unsent League", "username": "unsentleague"},
+    ])
+    d.quizzes.insert_many([
+        {"_id": "discover-alpha-1", "title": "Alpha 1", "questions": [], "channel_id": "discover-alpha", "status": "live", "notified": True, "channel_message_id": 1, "posted_at": current_time - timedelta(hours=1)},
+        {"_id": "discover-alpha-2", "title": "Alpha 2", "questions": [], "channel_id": "discover-alpha", "status": "live", "notified": True, "channel_message_id": 2, "posted_at": current_time - timedelta(hours=2)},
+        {"_id": "discover-beta-1", "title": "Beta 1", "questions": [], "channel_id": "discover-beta", "status": "live", "notified": True, "channel_message_id": 3, "posted_at": current_time - timedelta(hours=3)},
+        {"_id": "discover-stale-1", "title": "Stale", "questions": [], "channel_id": "discover-stale", "status": "live", "notified": True, "channel_message_id": 4, "posted_at": current_time - timedelta(hours=13, minutes=1)},
+        {"_id": "discover-draft-1", "title": "Draft", "questions": [], "channel_id": "discover-draft", "status": "draft", "notified": True, "channel_message_id": 5, "posted_at": current_time - timedelta(hours=1)},
+        {"_id": "discover-unsent-1", "title": "Unsent", "questions": [], "channel_id": "discover-unsent", "status": "live", "notified": False, "posted_at": current_time - timedelta(hours=1)},
+        {"_id": "discover-unconnected-1", "title": "Unconnected", "questions": [], "channel_id": "not-connected", "status": "live", "notified": True, "channel_message_id": 6, "posted_at": current_time - timedelta(hours=1)},
+    ])
+
+    response = c.get("/api/discover/channels", headers=H(800)).json()
+    assert [channel["id"] for channel in response["channels"]] == ["discover-alpha", "discover-beta"]
+    assert [channel["quizzes_today"] for channel in response["channels"]] == [2, 1]
+    assert response["channels"][0]["username"] == "alphaleague"
+    assert response["resets_at"] == "2026-01-02T23:00:00+00:00"
 
 
 def test_quiz_time_limit_and_whole_second_timing(monkeypatch):

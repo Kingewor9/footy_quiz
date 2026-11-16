@@ -260,6 +260,41 @@ def leaderboard(day: Optional[str] = Query(None), user: dict = Depends(current_u
     }
 
 
+@router.get("/discover/channels")
+def discover_channels(user: dict = Depends(current_user)):
+    d = db()
+    current_time = now()
+    local_today = current_time.astimezone(config.app_tz())
+    day_start = local_today.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    day_end = next_reset(current_time)
+    quizzes = d.quizzes.find(
+        {
+            "status": "live",
+            "notified": True,
+            "channel_message_id": {"$exists": True},
+            "posted_at": {"$gte": day_start, "$lt": day_end},
+        }
+    ).sort("posted_at", -1)
+
+    quiz_counts = {}
+    for quiz in quizzes:
+        channel_id = quiz.get("channel_id")
+        if channel_id:
+            quiz_counts[channel_id] = quiz_counts.get(channel_id, 0) + 1
+
+    channels = []
+    for channel in d.channels.find({"_id": {"$in": list(quiz_counts)}}):
+        channels.append({
+            "id": channel["_id"],
+            "title": channel["title"],
+            "username": channel.get("username"),
+            "logo_url": channel_logo_url(channel),
+            "quizzes_today": quiz_counts[channel["_id"]],
+        })
+    channels.sort(key=lambda channel: (-channel["quizzes_today"], (channel["title"] or "").casefold()))
+    return {"channels": channels, "resets_at": iso(day_end)}
+
+
 def channel_admin(d, user: dict, channel_id: str) -> dict:
     channel = d.channels.find_one({"_id": str(channel_id)})
     if not channel:
