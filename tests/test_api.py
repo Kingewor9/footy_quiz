@@ -127,6 +127,55 @@ def test_discover_channels_only_lists_connected_channels_with_live_quizzes_today
     assert response["resets_at"] == "2026-01-02T23:00:00+00:00"
 
 
+def test_admin_broadcast_preview_and_delivery(monkeypatch, request):
+    d = db()
+    recipient_ids = [83001, 83002]
+    request.addfinalizer(lambda: d.users.delete_many({"_id": {"$in": recipient_ids}}))
+    d.users.insert_many([{"_id": uid, "name": f"Player {uid}"} for uid in recipient_ids])
+    sent = []
+
+    def send_broadcast(text, image_url=None, button_text=None, button_url=None, chat_id=None):
+        sent.append({
+            "text": text,
+            "image_url": image_url,
+            "button_text": button_text,
+            "button_url": button_url,
+            "chat_id": chat_id,
+        })
+        if chat_id == "83002":
+            raise RuntimeError("bot was blocked")
+
+    monkeypatch.setattr(telegram, "send_broadcast", send_broadcast)
+    payload = {
+        "text": "Weekend quiz is live!",
+        "image_url": "https://example.com/poster.jpg",
+        "button_text": "Play now",
+        "button_url": "https://t.me/footyquizbot/play",
+    }
+
+    preview = c.post("/api/admin/broadcast/preview", json=payload, headers=H(1))
+    assert preview.status_code == 200 and preview.json() == {"ok": True}
+    assert sent[0] == {**payload, "chat_id": "1"}
+
+    existing_users = d.users.count_documents({})
+    result = c.post("/api/admin/broadcast", json=payload, headers=H(1))
+    assert result.status_code == 200
+    assert result.json()["attempted"] == existing_users
+    assert result.json()["sent"] == existing_users - 1
+    assert result.json()["failed"] == 1
+    assert result.json()["errors"] == [{"user_id": 83002, "error": "bot was blocked"}]
+
+    assert c.post("/api/admin/broadcast/preview", json=payload, headers=H(2)).status_code == 403
+    assert c.post("/api/admin/broadcast", json=payload, headers=H(2)).status_code == 403
+
+
+def test_broadcast_rejects_invalid_links_and_photo_caption_length():
+    base = {"text": "Hello players"}
+    assert c.post("/api/admin/broadcast", json={**base, "button_url": "https://example.com"}, headers=H(1)).status_code == 422
+    assert c.post("/api/admin/broadcast", json={**base, "image_url": "javascript:alert(1)"}, headers=H(1)).status_code == 422
+    assert c.post("/api/admin/broadcast", json={**base, "text": "x" * 1025, "image_url": "https://example.com/image.jpg"}, headers=H(1)).status_code == 422
+
+
 def test_quiz_time_limit_and_whole_second_timing(monkeypatch):
     assert c.post("/api/admin/quizzes", json=dict(QUIZ, max_seconds=0), headers=H(1)).status_code == 422
     r = c.post("/api/admin/quizzes", json=dict(QUIZ, max_seconds=5), headers=H(1))

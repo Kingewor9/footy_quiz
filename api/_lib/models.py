@@ -1,4 +1,5 @@
 from typing import List, Literal, Optional
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -70,3 +71,37 @@ class WinnerCardActionIn(BaseModel):
 
 class ChannelIn(BaseModel):
     username: str = Field(min_length=2, max_length=64)
+
+
+class BroadcastMessageIn(BaseModel):
+    text: str = Field(min_length=1, max_length=4096)
+    image_url: Optional[str] = Field(default=None, max_length=2048)
+    button_text: Optional[str] = Field(default=None, max_length=64)
+    button_url: Optional[str] = Field(default=None, max_length=2048)
+
+    @model_validator(mode="after")
+    def validate_message(self):
+        self.text = self.text.strip()
+        self.image_url = self.image_url.strip() if self.image_url and self.image_url.strip() else None
+        self.button_text = self.button_text.strip() if self.button_text and self.button_text.strip() else None
+        self.button_url = self.button_url.strip() if self.button_url and self.button_url.strip() else None
+
+        if not self.text:
+            raise ValueError("Enter a message to send.")
+        if self.image_url and len(self.text) > 1024:
+            raise ValueError("Messages with an image must be 1,024 characters or fewer.")
+        if self.image_url and not is_http_url(self.image_url):
+            raise ValueError("Enter a valid http or https image URL.")
+        if bool(self.button_text) != bool(self.button_url):
+            raise ValueError("Enter both a link URL and button text, or leave both blank.")
+        if self.button_url and not is_http_url(self.button_url):
+            raise ValueError("Enter a valid http or https button URL.")
+        return self
+
+
+def is_http_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        return parsed.scheme in ("http", "https") and bool(parsed.hostname)
+    except ValueError:
+        return False

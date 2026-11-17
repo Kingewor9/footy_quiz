@@ -14,7 +14,7 @@ from .auth import admin_user, current_user
 from .db import db
 from .grading import grade, public_question
 from .leaderboard import board_for_day, day_key, next_reset, now
-from .models import ChannelIn, QuizIn, SubmitIn, WinnerCardActionIn
+from .models import BroadcastMessageIn, ChannelIn, QuizIn, SubmitIn, WinnerCardActionIn
 from .winner_card import build_card, fmt_time
 
 app = FastAPI(title="Footy Quiz API")
@@ -636,6 +636,48 @@ def analytics(user: dict = Depends(admin_user)):
         "channels_connected": d.channels.count_documents({}),
         "daily": daily,
         "quizzes": quizzes,
+    }
+
+
+@router.post("/admin/broadcast/preview")
+def preview_broadcast(body: BroadcastMessageIn, user: dict = Depends(admin_user)):
+    try:
+        telegram.send_broadcast(
+            body.text,
+            body.image_url,
+            body.button_text,
+            body.button_url,
+            chat_id=str(user["id"]),
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Could not send preview to your Telegram chat: {e}")
+    return {"ok": True}
+
+
+@router.post("/admin/broadcast")
+def broadcast_message(body: BroadcastMessageIn, user: dict = Depends(admin_user)):
+    d = db()
+    recipients = [recipient["_id"] for recipient in d.users.find({}, {"_id": 1}) if isinstance(recipient.get("_id"), int)]
+    sent = 0
+    errors = []
+    for recipient_id in recipients:
+        try:
+            telegram.send_broadcast(
+                body.text,
+                body.image_url,
+                body.button_text,
+                body.button_url,
+                chat_id=str(recipient_id),
+            )
+            sent += 1
+        except Exception as e:
+            if len(errors) < 5:
+                errors.append({"user_id": recipient_id, "error": str(e)[:240]})
+    return {
+        "attempted": len(recipients),
+        "sent": sent,
+        "failed": len(recipients) - sent,
+        "errors": errors,
     }
 
 

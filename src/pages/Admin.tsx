@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { ArrowLeft, BarChart3, RadioTower, Send, Trophy } from 'lucide-react'
+import { ArrowLeft, BarChart3, RadioTower, Send, Trophy, Megaphone } from 'lucide-react'
 import Analytics from './admin/Analytics'
+import BroadcastMessage from './admin/BroadcastMessage'
 import SendQuiz from './admin/SendQuiz'
 import WinnerAnnouncement from './admin/WinnerAnnouncement'
 
@@ -16,12 +17,24 @@ export default function Admin({
   onBack?: () => void
 }) {
   const [view, setView] = useState<'send' | 'winners' | 'analytics'>('send')
+  const [platformView, setPlatformView] = useState<'analytics' | 'broadcast'>('analytics')
   if (!channelId) {
     return (
-      <div className="page">
-        <div className="row" style={{ gap: 10, marginBottom: 8 }}><BarChart3 size={20} /><h1 style={{ margin: 0 }}>Game analytics</h1></div>
-        <p className="sub">Platform-wide activity across connected channel leagues.</p>
-        {isPlatformAdmin ? <Analytics /> : <div className="notice err">Analytics are available to the game administrator only.</div>}
+      <div className="page platform-admin-page">
+        <div className="row" style={{ gap: 10, marginBottom: 8 }}>
+          {platformView === 'analytics' ? <BarChart3 size={20} /> : <Megaphone size={20} />}
+          <h1 style={{ margin: 0 }}>{platformView === 'analytics' ? 'Game analytics' : 'Broadcast message'}</h1>
+        </div>
+        <p className="sub">{platformView === 'analytics' ? 'Platform-wide activity across connected channel leagues.' : 'Send an update directly to registered Footy Quiz players.'}</p>
+        {isPlatformAdmin ? (
+          <>
+            <div className="seg channel-admin-tabs platform-admin-tabs">
+              <button className={platformView === 'analytics' ? 'on' : ''} onClick={() => setPlatformView('analytics')}><BarChart3 size={14} /> Analytics</button>
+              <button className={platformView === 'broadcast' ? 'on' : ''} onClick={() => setPlatformView('broadcast')}><Megaphone size={14} /> Broadcast</button>
+            </div>
+            {platformView === 'analytics' ? <Analytics /> : <BroadcastMessage />}
+          </>
+        ) : <div className="notice err">Admin tools are available to the game administrator only.</div>}
       </div>
     )
   }

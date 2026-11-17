@@ -1016,6 +1016,68 @@ a.discover-channel-row:hover {
   gap: 6px;
 }
 
+.platform-admin-tabs {
+  margin-bottom: 16px;
+}
+
+.broadcast-panel .card {
+  gap: 18px;
+}
+
+.broadcast-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.broadcast-textarea {
+  line-height: 1.5;
+}
+
+.broadcast-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.broadcast-link-fields {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 10px;
+}
+
+.broadcast-inline-note {
+  margin: -12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.broadcast-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.broadcast-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--card-border-hover);
+  border-radius: 16px;
+  background: var(--soft);
+}
+
+.broadcast-confirm .row {
+  gap: 8px;
+}
+
 .channel-powered {
   margin: 27px 0 0;
   text-align: center;
@@ -1046,6 +1108,14 @@ a.discover-channel-row:hover {
     gap: 4px;
     padding: 6px 7px;
     font-size: 10px;
+  }
+
+  .broadcast-link-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .broadcast-actions > button {
+    flex: 1 1 100%;
   }
 }
 

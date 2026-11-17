@@ -177,3 +177,17 @@ export interface WinnerCardData {
   sent_at?: string | null
   message?: string
 }
+
+export interface BroadcastMessagePayload {
+  text: string
+  image_url?: string
+  button_text?: string
+  button_url?: string
+}
+
+export interface BroadcastOutcome {
+  attempted: number
+  sent: number
+  failed: number
+  errors: { user_id: number; error: string }[]
+}

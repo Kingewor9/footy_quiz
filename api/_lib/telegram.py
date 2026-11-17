@@ -166,6 +166,24 @@ def send_message(text: str, button_text: str, url: str, parse_mode: str = "HTML"
     return _check(httpx.post(_url("sendMessage"), json=payload, timeout=TIMEOUT))
 
 
+def send_broadcast(
+    text: str,
+    image_url: Optional[str] = None,
+    button_text: Optional[str] = None,
+    button_url: Optional[str] = None,
+    chat_id: Optional[str] = None,
+) -> dict:
+    payload = {"chat_id": chat_id, "text": text} if not image_url else {
+        "chat_id": chat_id,
+        "photo": image_url,
+        "caption": text,
+    }
+    if button_text and button_url:
+        payload["reply_markup"] = {"inline_keyboard": [[{"text": button_text, "url": button_url}]]}
+    method = "sendPhoto" if image_url else "sendMessage"
+    return _check(httpx.post(_url(method), json=payload, timeout=TIMEOUT))
+
+
 def send_photo_url(photo_url: str, caption: str, button_text: str, url: str, parse_mode: str = "HTML", chat_id: Optional[str] = None) -> dict:
     payload = {
         "chat_id": chat_id or config.channel_id(),
