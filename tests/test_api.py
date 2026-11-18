@@ -176,6 +176,63 @@ def test_broadcast_rejects_invalid_links_and_photo_caption_length():
     assert c.post("/api/admin/broadcast", json={**base, "text": "x" * 1025, "image_url": "https://example.com/image.jpg"}, headers=H(1)).status_code == 422
 
 
+def test_import_library_quiz_posts_as_channel_quiz_and_scores_on_channel_leaderboard(monkeypatch, request):
+    d = db()
+    channel_id = "-10088001"
+    request.addfinalizer(lambda: d.channels.delete_many({"_id": channel_id}))
+    request.addfinalizer(lambda: d.import_quizzes.delete_many({"title": "Shared league quiz"}))
+    request.addfinalizer(lambda: d.quizzes.delete_many({"channel_id": channel_id}))
+    request.addfinalizer(lambda: d.attempts.delete_many({"channel_id": channel_id}))
+    d.channels.insert_one({
+        "_id": channel_id,
+        "title": "Import Test League",
+        "username": "importtestleague",
+        "owner_id": 88001,
+        "admin_ids": [88001],
+    })
+    sent = []
+    monkeypatch.setenv("MINI_APP_LINK", "https://t.me/footyquizbot/play")
+    monkeypatch.setattr(telegram, "send_quiz_notification", lambda caption, button_text, url, image_url=None, chat_id=None: sent.append({"chat_id": chat_id, "url": url}) or {"message_id": 111})
+
+    template = c.post(
+        "/api/admin/import-quizzes",
+        json={"title": "Shared league quiz", "questions": [QUIZ["questions"][0]], "max_seconds": 45},
+        headers=H(1),
+    )
+    assert template.status_code == 200
+    template_id = template.json()["id"]
+    assert c.get("/api/admin/import-quizzes", headers=H(1)).json()[0]["id"] == template_id
+    assert c.get("/api/admin/import-quizzes", headers=H(2)).status_code == 403
+    assert c.get(f"/api/admin/channels/{channel_id}/import-quizzes", headers=H(88002)).status_code == 403
+
+    available = c.get(f"/api/admin/channels/{channel_id}/import-quizzes", headers=H(88001))
+    assert available.status_code == 200
+    assert available.json()[0]["title"] == "Shared league quiz"
+
+    imported = c.post(f"/api/admin/channels/{channel_id}/import-quizzes/{template_id}", headers=H(88001))
+    assert imported.status_code == 200 and imported.json()["notified"] is True
+    quiz_id = imported.json()["id"]
+    stored = d.quizzes.find_one({"_id": quiz_id})
+    assert stored["channel_id"] == channel_id
+    assert stored["imported_from"] == template_id
+    assert stored["questions"][0]["id"] != d.import_quizzes.find_one({"_id": template_id})["questions"][0]["id"]
+    assert sent == [{"chat_id": channel_id, "url": f"https://t.me/footyquizbot/play?startapp={quiz_id}"}]
+    channel_quizzes = c.get(f"/api/admin/quizzes?channel_id={channel_id}", headers=H(88001)).json()
+    assert any(quiz["id"] == quiz_id and quiz["status"] == "live" for quiz in channel_quizzes)
+
+    played = play(88002, quiz_id, ["1"])
+    assert played.status_code == 200
+    board = c.get(f"/api/channels/{channel_id}/leaderboard", headers=H(88002)).json()
+    assert board["rows"][0]["user_id"] == 88002
+    assert board["rows"][0]["points"] == 10
+    assert d.attempts.find_one({"quiz_id": quiz_id})["channel_id"] == channel_id
+
+
+def test_import_quizzes_requires_valid_questions_and_channel_admin():
+    assert c.post("/api/admin/import-quizzes", json={"title": "Invalid", "questions": [], "max_seconds": 60}, headers=H(1)).status_code == 422
+    assert c.post("/api/admin/import-quizzes", json={"title": "Forbidden", "questions": [QUIZ["questions"][0]]}, headers=H(2)).status_code == 403
+
+
 def test_quiz_time_limit_and_whole_second_timing(monkeypatch):
     assert c.post("/api/admin/quizzes", json=dict(QUIZ, max_seconds=0), headers=H(1)).status_code == 422
     r = c.post("/api/admin/quizzes", json=dict(QUIZ, max_seconds=5), headers=H(1))

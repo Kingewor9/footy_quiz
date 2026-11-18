@@ -14,7 +14,7 @@ from .auth import admin_user, current_user
 from .db import db
 from .grading import grade, public_question
 from .leaderboard import board_for_day, day_key, next_reset, now
-from .models import BroadcastMessageIn, ChannelIn, QuizIn, SubmitIn, WinnerCardActionIn
+from .models import BroadcastMessageIn, ChannelIn, ImportQuizIn, QuizIn, SubmitIn, WinnerCardActionIn
 from .winner_card import build_card, fmt_time
 
 app = FastAPI(title="Footy Quiz API")
@@ -525,6 +525,67 @@ def create_quiz(body: QuizIn, user: dict = Depends(current_user)):
     d.quizzes.insert_one(quiz)
     outcome = jobs.publish_quiz(d, quiz)
     return {"id": quiz["_id"], "status": "live", **outcome}
+
+
+def import_quiz_summary(quiz: dict) -> dict:
+    return {
+        "id": quiz["_id"],
+        "title": quiz["title"],
+        "question_count": len(quiz["questions"]),
+        "max_seconds": quiz["max_seconds"],
+        "created_at": iso(quiz["created_at"]),
+    }
+
+
+@router.post("/admin/import-quizzes")
+def create_import_quiz(body: ImportQuizIn, user: dict = Depends(admin_user)):
+    quiz = {
+        "_id": uuid.uuid4().hex[:12],
+        "title": body.title.strip(),
+        "questions": [{**question.model_dump(), "id": uuid.uuid4().hex[:8]} for question in body.questions],
+        "max_seconds": body.max_seconds,
+        "created_by": user["id"],
+        "created_at": now(),
+    }
+    db().import_quizzes.insert_one(quiz)
+    return import_quiz_summary(quiz)
+
+
+@router.get("/admin/import-quizzes")
+def list_import_quizzes(user: dict = Depends(admin_user)):
+    return [import_quiz_summary(quiz) for quiz in db().import_quizzes.find().sort("created_at", -1)]
+
+
+@router.get("/admin/channels/{channel_id}/import-quizzes")
+def channel_import_quizzes(channel_id: str, user: dict = Depends(current_user)):
+    channel_admin(db(), user, channel_id)
+    return [import_quiz_summary(quiz) for quiz in db().import_quizzes.find().sort("created_at", -1)]
+
+
+@router.post("/admin/channels/{channel_id}/import-quizzes/{import_id}")
+def import_quiz_to_channel(channel_id: str, import_id: str, user: dict = Depends(current_user)):
+    d = db()
+    channel = channel_admin(d, user, channel_id)
+    template = d.import_quizzes.find_one({"_id": import_id})
+    if not template:
+        raise HTTPException(404, "Imported quiz not found.")
+
+    quiz = {
+        "_id": uuid.uuid4().hex[:10],
+        "title": template["title"],
+        "questions": [{**question, "id": uuid.uuid4().hex[:8]} for question in template["questions"]],
+        "max_seconds": template["max_seconds"],
+        "created_by": user["id"],
+        "channel_id": channel["_id"],
+        "imported_from": template["_id"],
+        "created_at": now(),
+        "status": "publishing",
+        "posted_at": None,
+        "expires_at": None,
+    }
+    d.quizzes.insert_one(quiz)
+    outcome = jobs.publish_quiz(d, quiz)
+    return {"id": quiz["_id"], "status": "live", "title": quiz["title"], **outcome}
 
 
 @router.post("/admin/quizzes/{qid}/publish")

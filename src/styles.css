@@ -1016,8 +1016,91 @@ a.discover-channel-row:hover {
   gap: 6px;
 }
 
+.channel-admin-tabs {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.channel-admin-tabs::-webkit-scrollbar {
+  display: none;
+}
+
 .platform-admin-tabs {
   margin-bottom: 16px;
+}
+
+.import-library-intro {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: linear-gradient(120deg, var(--accent-soft), var(--soft));
+}
+
+.import-library-intro b {
+  font-size: 14px;
+}
+
+.import-library-intro .small {
+  line-height: 1.45;
+}
+
+.import-library-heading h2 {
+  margin: 0 0 3px;
+}
+
+.import-library-item {
+  padding: 14px 16px;
+}
+
+.import-library-item .grow {
+  display: grid;
+  gap: 4px;
+}
+
+.imported-quizzes-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+}
+
+.imported-quizzes-intro p {
+  margin: 4px 0 0;
+  line-height: 1.45;
+}
+
+.imported-quiz-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px;
+}
+
+.imported-quiz-copy {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.imported-quiz-copy > b {
+  overflow-wrap: anywhere;
+}
+
+.imported-quiz-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.imported-quiz-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .broadcast-panel .card {
@@ -1116,6 +1199,15 @@ a.discover-channel-row:hover {
 
   .broadcast-actions > button {
     flex: 1 1 100%;
+  }
+
+  .imported-quiz-row {
+    align-items: flex-start;
+  }
+
+  .imported-quiz-row .btn {
+    flex: none;
+    padding: 8px 10px;
   }
 }
 

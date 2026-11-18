@@ -1,5 +1,5 @@
 import { initData } from './telegram'
-import type { AdminQuiz, Analytics, Board, BroadcastMessagePayload, BroadcastOutcome, Channel, CreateOutcome, DiscoverChannels, Me, QuizPayload, QuizResult, QuizSummary, StartedQuiz, WinnerCardData, WinnerCardDay } from './types'
+import type { AdminQuiz, Analytics, Board, BroadcastMessagePayload, BroadcastOutcome, Channel, CreateOutcome, DiscoverChannels, ImportQuizOutcome, ImportQuizPayload, ImportQuizSummary, Me, QuizPayload, QuizResult, QuizSummary, StartedQuiz, WinnerCardData, WinnerCardDay } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -53,6 +53,10 @@ export const api = {
     publish: (id: string) => post<CreateOutcome>(`/admin/quizzes/${id}/publish`),
     cancel: (id: string) => req<{ ok: boolean }>(`/admin/quizzes/${id}`, { method: 'DELETE' }),
     analytics: () => req<Analytics>('/admin/analytics'),
+    importQuizzes: () => req<ImportQuizSummary[]>('/admin/import-quizzes'),
+    createImportQuiz: (body: ImportQuizPayload) => post<ImportQuizSummary>('/admin/import-quizzes', body),
+    channelImportQuizzes: (channelId: string) => req<ImportQuizSummary[]>(`/admin/channels/${encodeURIComponent(channelId)}/import-quizzes`),
+    importQuizToChannel: (channelId: string, importId: string) => post<ImportQuizOutcome>(`/admin/channels/${encodeURIComponent(channelId)}/import-quizzes/${encodeURIComponent(importId)}`),
     previewBroadcast: (body: BroadcastMessagePayload) => post<{ ok: boolean }>('/admin/broadcast/preview', body),
     broadcast: (body: BroadcastMessagePayload) => post<BroadcastOutcome>('/admin/broadcast', body),
     winnerDays: (channelId?: string) => req<WinnerCardDay[]>(`/admin/winner-card/days${channelId ? `?channel_id=${encodeURIComponent(channelId)}` : ''}`),

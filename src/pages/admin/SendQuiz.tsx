@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
-import type { AdminQuiz, QuestionPayload } from '../../types'
+import type { AdminQuiz, ImportQuizSummary, QuestionPayload } from '../../types'
 
 type QType = 'poll' | 'text' | 'image'
 interface Draft {
@@ -93,7 +93,7 @@ function QuestionEditor({ n, d, onChange, onRemove, canRemove }: { n: number; d:
   )
 }
 
-export default function SendQuiz({ channelId }: { channelId?: string }) {
+export default function SendQuiz({ channelId, importLibrary = false }: { channelId?: string; importLibrary?: boolean }) {
   const [title, setTitle] = useState('')
   const [maxSeconds, setMaxSeconds] = useState(60)
   const [mode, setMode] = useState<'live' | 'draft'>('live')
@@ -102,10 +102,15 @@ export default function SendQuiz({ channelId }: { channelId?: string }) {
   const [publishingId, setPublishingId] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [recent, setRecent] = useState<AdminQuiz[]>([])
+  const [importQuizzes, setImportQuizzes] = useState<ImportQuizSummary[]>([])
 
   const loadRecent = useCallback(() => {
+    if (importLibrary) {
+      api.admin.importQuizzes().then(setImportQuizzes).catch((e) => setMsg({ ok: false, text: e.message }))
+      return
+    }
     api.admin.quizzes(channelId).then(setRecent).catch(() => undefined)
-  }, [channelId])
+  }, [channelId, importLibrary])
   useEffect(loadRecent, [loadRecent])
 
   const handlePublish = async (id: string) => {
@@ -132,6 +137,19 @@ export default function SendQuiz({ channelId }: { channelId?: string }) {
     if (!Number.isInteger(maxSeconds) || maxSeconds < 1 || maxSeconds > 3600) return setMsg({ ok: false, text: 'Set a time limit from 1 to 3600 whole seconds.' })
     setBusy(true)
     try {
+      if (importLibrary) {
+        await api.admin.createImportQuiz({
+          title: title.trim(),
+          max_seconds: maxSeconds,
+          questions: qs.map(toPayload),
+        })
+        setMsg({ ok: true, text: 'Quiz saved to the import library for connected channels.' })
+        setTitle('')
+        setMaxSeconds(60)
+        setQs([blank()])
+        loadRecent()
+        return
+      }
       const r = await api.admin.create({
         title: title.trim(),
         max_seconds: maxSeconds,
@@ -148,36 +166,71 @@ export default function SendQuiz({ channelId }: { channelId?: string }) {
       loadRecent()
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message })
+    } finally {
+      setBusy(false)
     }
-    setBusy(false)
   }
 
   return (
     <>
       {msg && <div className={`notice ${msg.ok ? 'ok' : 'err'}`}>{msg.text}</div>}
       <div className="qcard stack">
+        {importLibrary && (
+          <div className="import-library-intro">
+            <b>Build once, share across leagues.</b>
+            <span className="small muted">Saved quizzes become available to every connected channel. Channel admins can import and post a copy to their own league.</span>
+          </div>
+        )}
         <div className="field">
-          <label>Quiz title</label>
+          <label>{importLibrary ? 'Imported quiz title' : 'Quiz title'}</label>
           <input className="input" placeholder="Matchday trivia" value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
         <div className="field">
           <label htmlFor="quiz-time-limit">Time limit in seconds (1–3600)</label>
           <input id="quiz-time-limit" className="input" type="number" min={1} max={3600} step={1} required value={maxSeconds} onChange={(e) => setMaxSeconds(Number(e.target.value))} />
         </div>
-        <div className="seg">
-          <button className={mode === 'live' ? 'on' : ''} onClick={() => setMode('live')}>Send now</button>
-          <button className={mode === 'draft' ? 'on' : ''} onClick={() => setMode('draft')}>Save as draft</button>
-        </div>
-        <div className="small muted">Live quizzes close at the daily leaderboard reset.</div>
+        {!importLibrary && (
+          <>
+            <div className="seg">
+              <button className={mode === 'live' ? 'on' : ''} onClick={() => setMode('live')}>Send now</button>
+              <button className={mode === 'draft' ? 'on' : ''} onClick={() => setMode('draft')}>Save as draft</button>
+            </div>
+            <div className="small muted">Live quizzes close at the daily leaderboard reset.</div>
+          </>
+        )}
       </div>
 
       {qs.map((d, i) => (
         <QuestionEditor key={d.key} n={i + 1} d={d} canRemove={qs.length > 1} onChange={(nd) => setQs(qs.map((x) => (x.key === d.key ? nd : x)))} onRemove={() => setQs(qs.filter((x) => x.key !== d.key))} />
       ))}
       {qs.length < 30 && <button className="btn ghost block" style={{ marginBottom: 12 }} onClick={() => setQs([...qs, blank()])}>Add question</button>}
-      <button className="btn block" disabled={busy} onClick={submit}>{busy ? 'Working…' : mode === 'live' ? 'Send quiz now' : 'Save as draft'}</button>
+      <button className="btn block" disabled={busy} onClick={submit}>
+        {busy ? 'Working…' : importLibrary ? 'Save to import library' : mode === 'live' ? 'Send quiz now' : 'Save as draft'}
+      </button>
 
-      {recent.length > 0 && (
+      {importLibrary && (
+        <>
+          <div className="section-header-row import-library-heading">
+            <div><h2>Available for import</h2><span className="small muted">Shared with all connected channel admins.</span></div>
+            <span className="count-bubble">{importQuizzes.length}</span>
+          </div>
+          {importQuizzes.length === 0 ? (
+            <div className="empty empty-state-box">
+              <span className="small muted">No shared quizzes yet. Save one above to make it available to channels.</span>
+            </div>
+          ) : importQuizzes.map((quiz) => (
+            <div className="card row import-library-item" key={quiz.id}>
+              <div className="grow">
+                <b>{quiz.title}</b>
+                <div className="small muted">{quiz.question_count} questions · {quiz.max_seconds}s per question</div>
+              </div>
+              <span className="chip">Shared</span>
+            </div>
+          ))}
+        </>
+      )}
+
+      {!importLibrary && recent.length > 0 && (
         <>
           <h2 style={{ marginTop: 28 }}>Recent quizzes & drafts</h2>
           {recent.map((q) => (

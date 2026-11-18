@@ -59,6 +59,12 @@ class QuizIn(BaseModel):
         return values
 
 
+class ImportQuizIn(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+    questions: List[QuestionIn] = Field(min_length=1, max_length=30)
+    max_seconds: int = Field(default=60, ge=1, le=3600)
+
+
 class SubmitIn(BaseModel):
     answers: dict[str, str] = {}
 

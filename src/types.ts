@@ -105,6 +105,20 @@ export interface AdminQuiz {
   players: number
   notify_error: string | null
 }
+export interface ImportQuizSummary {
+  id: string
+  title: string
+  question_count: number
+  max_seconds: number
+  created_at: string
+}
+export interface ImportQuizOutcome {
+  id: string
+  status: 'live'
+  title: string
+  notified: boolean
+  error: string | null
+}
 export interface Analytics {
   total_players: number
   players_today: number
@@ -135,6 +149,11 @@ export interface QuizPayload {
   max_seconds: number
   status?: 'live' | 'draft'
   channel_id?: string
+  questions: QuestionPayload[]
+}
+export interface ImportQuizPayload {
+  title: string
+  max_seconds: number
   questions: QuestionPayload[]
 }
 

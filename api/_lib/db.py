@@ -24,6 +24,7 @@ def db():
         d.attempts.create_index([("channel_id", 1), ("day_key", 1)])
         d.quizzes.create_index([("status", 1), ("posted_at", -1)])
         d.quizzes.create_index([("channel_id", 1), ("status", 1)])
+        d.import_quizzes.create_index("created_at")
         d.channels.create_index("owner_id")
         d.channels.create_index("admin_ids")
         _indexed = True
